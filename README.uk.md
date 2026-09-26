@@ -15,6 +15,7 @@
 - [docs/requirements.md](docs/requirements.md) — повний перелік зібраних вимог (контент, типографіка, друк, виняткові сторінки).
 - [docs/architecture.md](docs/architecture.md) — 4 рівні автоматизації, технологічний стек, знахідки з аналізу реальних IDML-зразків, відкриті питання.
 - [docs/content-structure.md](docs/content-structure.md) — конвенція папок/файлів для тижневого випуску.
+- [docs/first-run-checklist.md](docs/first-run-checklist.md) — покроковий чек-лист для першого реального запуску на Windows+InDesign верстальниці.
 
 ## Технологічний стек
 
