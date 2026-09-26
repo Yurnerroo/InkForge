@@ -1,10 +1,13 @@
 """FastAPI-застосунок Рівня 3 — One-Click Launcher.
 
 Одна локальна сторінка з кнопками "Перевірити контент" / "Побудувати план
-верстки" / "Зверстати в InDesign", кожна — окремий підтверджуваний крок (без
-автоланцюжка). /api/check і /api/plan — тонкі обгортки над вже протестованим
-кодом Рівня 1/2. /api/execute делегує в `indesign_bridge` (COM, лише Windows,
-не перевірено на реальному InDesign). Див. docs/architecture.md, "Рівень 3".
+верстки" / "Зверстати в InDesign" / "Експорт друк-PDF", кожна — окремий
+підтверджуваний крок (без автоланцюжка; ручне доправлення в самому InDesign
+лишається між кроками "Зверстати" і "Експорт" — не автоматизується).
+/api/check і /api/plan — тонкі обгортки над вже протестованим кодом
+Рівня 1/2. /api/execute і /api/export_pdf делегують в `indesign_bridge`
+(COM, лише Windows, не перевірено на реальному InDesign). Див.
+docs/architecture.md, "Рівень 3".
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ from . import indesign_bridge
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_PROFILES_DIR = REPO_ROOT / "profiles"
 DEFAULT_SCRIPT_PATH = REPO_ROOT / "extendscript" / "inkforge_layout.jsx"
+DEFAULT_PDF_SCRIPT_PATH = REPO_ROOT / "extendscript" / "inkforge_export_pdf.jsx"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
@@ -41,6 +45,15 @@ class ExecuteRequest(IssueRequest):
     issue_number: str | None = None
 
 
+class ExportPdfRequest(IssueRequest):
+    pdf_path: str
+    # Fallback, лише якщо в InDesign немає вже відкритого документа (див.
+    # inkforge_export_pdf.jsx, getTargetDocument). Типово доправлений
+    # документ уже відкритий після кроків 3-4, тому не обов'язково.
+    indd_path: str | None = None
+    preset_name: str | None = None
+
+
 def list_profile_ids(profiles_dir: Path) -> list[str]:
     if not profiles_dir.is_dir():
         return []
@@ -50,12 +63,14 @@ def list_profile_ids(profiles_dir: Path) -> list[str]:
 def create_app(
     profiles_dir: Path = DEFAULT_PROFILES_DIR,
     script_path: Path = DEFAULT_SCRIPT_PATH,
+    pdf_script_path: Path = DEFAULT_PDF_SCRIPT_PATH,
 ) -> FastAPI:
     """Build the launcher's FastAPI app.
 
-    ``profiles_dir``/``script_path`` are overridable so tests can point at
-    fixture directories instead of the real repo-level ``profiles/`` and
-    ``extendscript/inkforge_layout.jsx``.
+    ``profiles_dir``/``script_path``/``pdf_script_path`` are overridable so
+    tests can point at fixture directories instead of the real repo-level
+    ``profiles/``, ``extendscript/inkforge_layout.jsx`` and
+    ``extendscript/inkforge_export_pdf.jsx``.
     """
 
     app = FastAPI(title="InkForge Launcher")
@@ -138,6 +153,28 @@ def create_app(
             raise HTTPException(502, str(exc)) from exc
 
         return {"output": output}
+
+    @app.post("/api/export_pdf")
+    def export_pdf(req: ExportPdfRequest) -> dict[str, Any]:
+        issue_path = Path(req.issue_folder)
+        plan_path = issue_path / "layout_plan.json"
+        if not plan_path.is_file():
+            raise HTTPException(
+                400, "layout_plan.json не знайдено — спочатку запусти /api/plan."
+            )
+
+        try:
+            output = indesign_bridge.run_export_pdf_script(
+                plan_path=plan_path,
+                pdf_path=Path(req.pdf_path),
+                script_path=pdf_script_path,
+                indd_path=Path(req.indd_path) if req.indd_path else None,
+                preset_name=req.preset_name,
+            )
+        except indesign_bridge.IndesignBridgeError as exc:
+            raise HTTPException(502, str(exc)) from exc
+
+        return {"output": output, "pdf_path": req.pdf_path}
 
     return app
 

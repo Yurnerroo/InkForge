@@ -1,8 +1,12 @@
 # ExtendScript-виконавець Рівня 2
 
-`inkforge_layout.jsx` — скрипт для Adobe InDesign, що споживає
-`layout_plan.json`, записаний Python-планувальником (`inkforge-plan`, див.
-`src/inkforge/layout_engine/`).
+# ExtendScript-виконавці Рівня 2/3
+
+- `inkforge_layout.jsx` — скрипт для Adobe InDesign, що споживає
+  `layout_plan.json`, записаний Python-планувальником (`inkforge-plan`, див.
+  `src/inkforge/layout_engine/`). Верстає статті (крок 3 Рівня 3).
+- `inkforge_export_pdf.jsx` — окремий скрипт для друк-PDF (крок 5 Рівня 3,
+  після кроку 4 — ручного доправлення верстальницею). Див. розділ нижче.
 
 ## Статус: частковий, не перевірений на реальному InDesign
 
@@ -68,6 +72,27 @@
 InDesign-середовищі верстальниці (жодна з реалізованих функцій цього файлу
 ще не запускалась на справжньому документі).
 
+## `inkforge_export_pdf.jsx` — друк-PDF (Рівень 3, крок 5)
+
+Окремий скрипт, що запускається **після** ручного доправлення верстальницею
+(крок 4) — не частина `inkforge_layout.jsx`. Реалізовано:
+
+- Використовує вже відкритий у InDesign документ (`app.activeDocument`), якщо
+  такий є, — щоб не загубити ручні правки кроку 4. Переоткриття за `docPath`
+  (аргумент/діалог) — лише fallback, якщо InDesign запущено без відкритого
+  документа.
+- Застосовує вбудований пресет `[PDF/X-1a:2001]` (назва з квадратними
+  дужками — точна назва в InDesign, не косметика; кастомного `.joboptions` у
+  верстальниці немає — підтверджено).
+- Явно вмикає `Color Conversion: Convert to Destination` з CMYK-профілем
+  газети (`cmyk_profile` з `layout_plan.json`, підтверджено
+  `ISOnewspaper26v4` для всіх трьох газет) — а не покладається на дефолт
+  пресету (див. `docs/architecture.md`, "З'ясовано (26.09.2026)").
+
+**НЕ перевірено на реальному InDesign** — як і `inkforge_layout.jsx`, написано
+за документованим InDesign Scripting DOM без доступу до реального InDesign у
+поточному dev-оточенні.
+
 ## Як запускати
 
 **Вручну (без Рівня 3):**
@@ -77,10 +102,16 @@ InDesign-середовищі верстальниці (жодна з реалі
    `inkforge_layout.jsx`.
 3. Скрипт запитає файл-основу (`.indd` попереднього випуску) і
    `layout_plan.json` через діалог вибору файлу.
+4. Вручну доправити верстку в InDesign (обов'язковий крок).
+5. Запустити `inkforge_export_pdf.jsx` з тієї ж панелі Scripts — запитає
+   `layout_plan.json` (звідти береться `cmyk_profile`) і шлях для збереження
+   PDF; документ бере вже відкритий (з кроку 2-4), якщо такий є.
 
 **Через Рівень 3 (`inkforge-launcher`, Windows-only):** кнопка "Зверстати в
 InDesign" сама проставляє `app.scriptArgs` (`docPath`, `planPath`,
-`issueDate`, `issueNumber`) і запускає цей скрипт через COM — без ручного
-відкриття діалогів і без перемикання в InDesign. Див.
-`src/inkforge/launcher/indesign_bridge.py` і `docs/architecture.md`, розділ
-"Рівень 3" (COM-крок так само не перевірений на реальному InDesign).
+`issueDate`, `issueNumber`) і запускає `inkforge_layout.jsx` через COM; кнопка
+"Експорт друк-PDF" — так само проставляє `planPath`/`pdfPath`/`presetName` і
+запускає `inkforge_export_pdf.jsx` — без ручного відкриття діалогів і без
+перемикання в InDesign. Див. `src/inkforge/launcher/indesign_bridge.py` і
+`docs/architecture.md`, розділ "Рівень 3" (обидва COM-кроки так само не
+перевірені на реальному InDesign).
