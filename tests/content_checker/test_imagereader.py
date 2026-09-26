@@ -54,3 +54,46 @@ def test_read_image_info_corrupt_file_returns_none(tmp_path: Path) -> None:
     info = read_image_info(path)
 
     assert info is None
+
+
+def test_read_image_info_normalizes_ifdrational_dpi_to_float(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Regression test: real-world JPEGs with EXIF-only resolution tags (no
+    JFIF header) make Pillow report dpi as IFDRational, which broke JSON
+    serialization of the manifest ("Object of type IFDRational is not JSON
+    serializable")."""
+
+    from PIL.TiffImagePlugin import IFDRational
+
+    path = tmp_path / "photo.jpg"
+    Image.new("RGB", (100, 100)).save(path)
+
+    real_open = Image.open
+
+    class _FakeImg:
+        def __init__(self, img):
+            self._img = img
+            self.size = img.size
+            self.mode = img.mode
+            self.info = {"dpi": (IFDRational(300, 1), IFDRational(300, 1))}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self._img.close()
+
+    def fake_open(p):
+        return _FakeImg(real_open(p))
+
+    monkeypatch.setattr(Image, "open", fake_open)
+
+    info = read_image_info(path)
+
+    assert info is not None
+    assert info.dpi == (300.0, 300.0)
+    assert all(isinstance(d, float) for d in info.dpi)
+    import json
+
+    json.dumps({"dpi": info.dpi})  # must not raise

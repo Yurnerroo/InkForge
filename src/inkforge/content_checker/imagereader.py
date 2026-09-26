@@ -43,6 +43,12 @@ def read_image_info(path: Path, *, min_dpi: float = DEFAULT_MIN_DPI) -> ImageInf
     except Exception:
         return None
 
+    if dpi:
+        # Some real-world JPEGs (EXIF-based resolution tags rather than a
+        # plain JFIF header) report dpi as PIL's IFDRational, which isn't
+        # JSON-serializable -- normalize to plain floats up front.
+        dpi = tuple(float(value) for value in dpi)
+
     warnings: list[str] = []
     if not dpi:
         warnings.append("Photo has no embedded DPI metadata; resolution cannot be checked")
