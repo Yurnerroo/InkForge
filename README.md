@@ -2,7 +2,7 @@
 
 Автоматизація верстки щотижневої газети в Adobe InDesign — від перевірки контенту до готового друк-PDF у кілька кліків.
 
-> Статус: **Рівень 1 (Content Checker) готовий**. Розробка Рівня 2 (InDesign-скрипт) призупинена до глибшого аналізу зразків IDML (див. "Знахідки з аналізу реальних зразків" у [docs/architecture.md](docs/architecture.md)).
+> Статус: **Рівень 1 (Content Checker) готовий**. Рівень 2 (планувальник верстки) — Python-частина (`inkforge-plan`) готова й покрита тестами; ExtendScript-виконавець для InDesign — чорновий, ще не перевірений на реальному документі (див. [extendscript/README.md](extendscript/README.md)).
 
 ## Для кого
 
@@ -16,15 +16,18 @@
 
 ## Технологічний стек
 
-- **Python** — підготовка та перевірка контенту (`src/inkforge/content_checker`), one-click launcher (Рівень 3).
+- **Python** — підготовка та перевірка контенту (`src/inkforge/content_checker`), планування верстки (`src/inkforge/layout_engine`), one-click launcher (Рівень 3).
 - **Adobe InDesign ExtendScript/UXP** — власна автоверстка та експорт друк-PDF (Рівень 2), бо це найнадійніше відтворює справжню газетну верстку (CMYK, обріз, PDF/X-1a).
 
 ## Структура репозиторію
 
 ```
 docs/                     вимоги, архітектура, конвенції контенту
+profiles/                 по одному YAML-профілю на газету (схема — profiles/schema.md)
 src/inkforge/
   content_checker/        Рівень 1: сканування випуску, побудова manifest.json
+  layout_engine/          Рівень 2 (Python-частина): manifest.json + профіль -> layout_plan.json
+extendscript/              Рівень 2 (InDesign-частина): виконавець layout_plan.json (чорновий)
 tests/                    pytest-тести для Python-частини
 ```
 
@@ -41,6 +44,19 @@ inkforge-check path/to/2026-W40_gazeta-x --newspaper "Ти і Я"
 
 Це виведе звіт у консоль і запише `manifest.json` у папку випуску
 (шлях можна змінити прапорцем `--manifest-out`, або пропустити запис `--no-manifest`).
+
+## Рівень 2: планувальник верстки
+
+Python-частина читає `manifest.json` (з Рівня 1) і профіль газети
+(`profiles/<id>.yaml`, схема — [profiles/schema.md](profiles/schema.md)), і
+будує `layout_plan.json`: які сторінки автоматизувати, який колірний режим і
+пропорційний розподіл простору між статтями. ExtendScript-виконавець для
+самого InDesign, що споживає цей план, — ще чорновий (див.
+[extendscript/README.md](extendscript/README.md)).
+
+```bash
+inkforge-plan path/to/2026-W40_gazeta-x/manifest.json --profile ty_i_ya
+```
 
 Запуск тестів:
 
