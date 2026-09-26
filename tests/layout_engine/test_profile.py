@@ -56,6 +56,7 @@ def test_load_profile_parses_all_fields(tmp_path: Path) -> None:
     assert profile.photo_links.storage == "linked"
     assert profile.cmyk_profile is None
     assert profile.character_size_roles is None
+    assert profile.headline_font_alternation is None
 
 
 def test_color_mode_for_page(tmp_path: Path) -> None:
@@ -132,3 +133,25 @@ def test_dyhovnist_profile_carries_character_size_roles_fallback() -> None:
     assert profile.character_size_roles is not None
     assert profile.character_size_roles["method"] == "character_point_size"
     assert profile.character_size_roles["body_point_size_max"] < profile.character_size_roles["headline_like_point_size_min"]
+
+
+def test_ty_i_ya_profile_carries_headline_font_alternation() -> None:
+    """Ty i Ya has a confirmed headline-font-alternation rule (see
+    profiles/ty_i_ya.yaml notes) — should surface as a structured field,
+    not just prose in `notes`."""
+
+    profile = load_profile_by_id("ty_i_ya", PROFILES_DIR)
+
+    assert profile.headline_font_alternation is not None
+    assert profile.headline_font_alternation["confirmed"] is True
+    assert len(profile.headline_font_alternation["fonts"]) == 2
+
+
+@pytest.mark.parametrize("newspaper_id", ["mif", "dyhovnist"])
+def test_other_profiles_default_headline_font_alternation_to_none(newspaper_id: str) -> None:
+    """MIF and Dyhovnist have no confirmed headline-font-alternation rule yet
+    — must not be guessed, so the field stays None."""
+
+    profile = load_profile_by_id(newspaper_id, PROFILES_DIR)
+
+    assert profile.headline_font_alternation is None

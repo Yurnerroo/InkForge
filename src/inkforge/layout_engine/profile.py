@@ -57,6 +57,7 @@ class NewspaperProfile:
     paragraph_styles_found: list[str]
     paragraph_style_roles: dict[str, list[str]] | str
     character_size_roles: dict[str, Any] | str | None
+    headline_font_alternation: dict[str, Any] | None
     special_pages: list[SpecialPage]
     fonts_installed: list[str]
     fonts_substituted: list[str]
@@ -192,6 +193,7 @@ def _profile_from_dict(raw: dict[str, Any]) -> NewspaperProfile:
         paragraph_styles_found=list(raw["paragraph_styles_found"]),
         paragraph_style_roles=raw["paragraph_style_roles"],
         character_size_roles=raw.get("character_size_roles"),
+        headline_font_alternation=raw.get("headline_font_alternation"),
         special_pages=special_pages,
         fonts_installed=list(raw["fonts_installed"]),
         fonts_substituted=list(raw["fonts_substituted"]),
