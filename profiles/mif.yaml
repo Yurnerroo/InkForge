@@ -17,7 +17,7 @@ color_alternation_pattern: >
   8, 9) у режимі Grayscale. Схоже, ця газета повністю чорно-біла, кольорових
   розворотів немає взагалі.
 
-cmyk_profile: null
+cmyk_profile: ISOnewspaper26v4
 
 photo_links:
   storage: linked
@@ -77,6 +77,11 @@ samples_analyzed:
   - "MIF_9(124)"
 
 notes: >
+  CMYK-профіль друку (ISOnewspaper26v4) підтверджено як спільний для всіх
+  трьох газет (одна друкарня, стандартний Adobe-пресет PDF/X-1a:2001 без
+  кастомного `.joboptions`) — див. однакове уточнення в `ty_i_ya.yaml` і
+  `dyhovnist.yaml`.
+
   Кілька назв стилів абзаців ("Pidzag", "TextOsnovn", "Vriz") збігаються з
   "Ти і Я" — ймовірно, верстальниця історично копіювала базові стилі між
   своїми шаблонами. Не покладатися на це як на гарантію: газета все одно має
