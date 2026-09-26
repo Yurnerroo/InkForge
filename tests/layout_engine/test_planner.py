@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from inkforge.layout_engine.planner import build_layout_plan
-from inkforge.layout_engine.profile import NewspaperProfile, PhotoLinks, Spread, SpecialPage
+from inkforge.layout_engine.profile import NewspaperProfile, Page1Layout, PhotoLinks, Spread, SpecialPage
 
 
 def _make_profile(**overrides: Any) -> NewspaperProfile:
@@ -49,6 +49,7 @@ def _article(
     lead: str = "",
     body: str = "",
     sub_order: int = 0,
+    char_count: int = 0,
 ) -> dict[str, Any]:
     return {
         "article_id": article_id,
@@ -62,6 +63,7 @@ def _article(
         "lead": lead,
         "body": body,
         "sub_order": sub_order,
+        "char_count": char_count,
     }
 
 
@@ -341,3 +343,159 @@ def test_planned_page_defaults_missing_sub_order_to_zero() -> None:
     plan = build_layout_plan(manifest, profile)
 
     assert plan.pages[0].articles[0].sub_order == 0
+
+
+def _page1_layout(**overrides: Any) -> Page1Layout:
+    defaults: dict[str, Any] = dict(
+        main_photo_frame_id="351cb",
+        main_headline_frame_id="35223",
+        main_body_frame_id="39190",
+        storm_forecast_frame_id="40ba4",
+        storm_forecast_keyword="магнітн",
+    )
+    defaults.update(overrides)
+    return Page1Layout(**defaults)
+
+
+def test_page1_special_assigns_main_role_to_longest_article() -> None:
+    profile = _make_profile(manual_pages=[6], page1_layout=_page1_layout())
+    manifest = _manifest(
+        [
+            {
+                "page": "1",
+                "articles": [
+                    _article("1_1_a", 1, "a", 50, char_count=300),
+                    _article("1_2_b", 2, "b", 80, char_count=900, title="Притча про три дерева"),
+                ],
+            }
+        ]
+    )
+
+    plan = build_layout_plan(manifest, profile)
+    page = plan.pages[0]
+
+    assert page.status == "planned_page1_special"
+    roles = {a.article_id: a.role for a in page.articles}
+    assert roles["1_2_b"] == "main"
+    assert roles["1_1_a"] == ""
+
+
+def test_page1_special_assigns_storm_forecast_role_by_keyword() -> None:
+    profile = _make_profile(manual_pages=[6], page1_layout=_page1_layout())
+    manifest = _manifest(
+        [
+            {
+                "page": "1",
+                "articles": [
+                    _article("1_1_a", 1, "a", 50, char_count=900, title="Головна стаття"),
+                    _article(
+                        "1_2_b",
+                        2,
+                        "b",
+                        20,
+                        char_count=100,
+                        title="Прогноз магнітних бур на тиждень",
+                    ),
+                ],
+            }
+        ]
+    )
+
+    plan = build_layout_plan(manifest, profile)
+    roles = {a.article_id: a.role for a in plan.pages[0].articles}
+
+    assert roles["1_1_a"] == "main"
+    assert roles["1_2_b"] == "storm_forecast"
+
+
+def test_page1_special_keyword_match_is_case_insensitive_and_checks_body() -> None:
+    profile = _make_profile(manual_pages=[6], page1_layout=_page1_layout())
+    manifest = _manifest(
+        [
+            {
+                "page": "1",
+                "articles": [
+                    _article("1_1_a", 1, "a", 50, char_count=900, title="Головна стаття"),
+                    _article("1_2_b", 2, "b", 20, char_count=100, body="МАГНІТНІ бурі очікуються"),
+                ],
+            }
+        ]
+    )
+
+    plan = build_layout_plan(manifest, profile)
+    roles = {a.article_id: a.role for a in plan.pages[0].articles}
+
+    assert roles["1_2_b"] == "storm_forecast"
+
+
+def test_page1_special_warns_when_storm_forecast_article_missing() -> None:
+    profile = _make_profile(manual_pages=[6], page1_layout=_page1_layout())
+    manifest = _manifest(
+        [{"page": "1", "articles": [_article("1_1_a", 1, "a", 50, char_count=900)]}]
+    )
+
+    plan = build_layout_plan(manifest, profile)
+    page = plan.pages[0]
+
+    assert page.articles[0].role == "main"
+    assert any("storm_forecast" in note for note in page.notes)
+
+
+def test_page1_special_warns_on_multiple_storm_forecast_matches() -> None:
+    profile = _make_profile(manual_pages=[6], page1_layout=_page1_layout())
+    manifest = _manifest(
+        [
+            {
+                "page": "1",
+                "articles": [
+                    _article("1_1_a", 1, "a", 50, char_count=900, title="Прогноз магнітних бур"),
+                    _article("1_2_b", 2, "b", 40, char_count=100, title="Ще один магнітний прогноз"),
+                ],
+            }
+        ]
+    )
+
+    plan = build_layout_plan(manifest, profile)
+    page = plan.pages[0]
+
+    assert all(a.role != "storm_forecast" for a in page.articles)
+    assert any("неоднозначно" in note for note in page.notes)
+    # ambiguous storm matches fall back to considering all articles for 'main'
+    assert any(a.role == "main" for a in page.articles)
+
+
+def test_page1_special_not_triggered_without_profile_page1_layout() -> None:
+    """Without page1_layout, page 1 goes through the generic planned path
+    (no role assigned) instead of the MIF-specific special-casing."""
+
+    profile = _make_profile(manual_pages=[6])  # page 1 no longer manual
+    manifest = _manifest([{"page": "1", "articles": [_article("1_1_a", 1, "a", 100)]}])
+
+    plan = build_layout_plan(manifest, profile)
+
+    assert plan.pages[0].status == "planned"
+    assert plan.pages[0].articles[0].role == ""
+
+
+def test_plan_carries_page1_layout_metadata_for_the_extendscript_executor() -> None:
+    profile = _make_profile(manual_pages=[6], page1_layout=_page1_layout())
+    manifest = _manifest([])
+
+    plan = build_layout_plan(manifest, profile)
+
+    assert plan.page1_layout == {
+        "main_photo_frame_id": "351cb",
+        "main_headline_frame_id": "35223",
+        "main_body_frame_id": "39190",
+        "storm_forecast_frame_id": "40ba4",
+        "storm_forecast_keyword": "магнітн",
+    }
+
+
+def test_plan_defaults_page1_layout_to_none_when_not_confirmed() -> None:
+    profile = _make_profile()
+    manifest = _manifest([])
+
+    plan = build_layout_plan(manifest, profile)
+
+    assert plan.page1_layout is None
