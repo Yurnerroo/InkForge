@@ -64,6 +64,7 @@ class LayoutPlan:
     fonts_substituted: list[str] = field(default_factory=list)
     paragraph_style_roles: dict[str, str] | str | None = None
     character_size_roles: dict[str, Any] | str | None = None
+    headline_font_alternation: dict[str, Any] | None = None
     min_horizontal_scale: int = MIN_HORIZONTAL_SCALE
     max_horizontal_scale: int = MAX_HORIZONTAL_SCALE
     pages: list[PagePlan] = field(default_factory=list)
@@ -82,6 +83,7 @@ def build_layout_plan(manifest: dict[str, Any], profile: NewspaperProfile) -> La
         fonts_substituted=list(profile.fonts_substituted),
         paragraph_style_roles=profile.paragraph_style_roles,
         character_size_roles=profile.character_size_roles,
+        headline_font_alternation=profile.headline_font_alternation,
     )
 
     seen_pages: set[int] = set()

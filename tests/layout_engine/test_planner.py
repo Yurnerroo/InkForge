@@ -25,6 +25,7 @@ def _make_profile(**overrides: Any) -> NewspaperProfile:
         paragraph_styles_found=["Body"],
         paragraph_style_roles={"body": ["Body"]},
         character_size_roles=None,
+        headline_font_alternation=None,
         special_pages=[],
         fonts_installed=["Arial"],
         fonts_substituted=[],
@@ -218,6 +219,31 @@ def test_plan_defaults_character_size_roles_to_none_when_not_needed() -> None:
     plan = build_layout_plan(manifest, profile)
 
     assert plan.character_size_roles is None
+
+
+def test_plan_carries_headline_font_alternation() -> None:
+    """Ty i Ya-style profiles pass headline_font_alternation through unchanged."""
+
+    alternation = {
+        "method": "alternate_by_article_order_on_page",
+        "fonts": ["Comfortaa", "EB Garamond"],
+        "confirmed": True,
+    }
+    profile = _make_profile(headline_font_alternation=alternation)
+    manifest = _manifest([])
+
+    plan = build_layout_plan(manifest, profile)
+
+    assert plan.headline_font_alternation == alternation
+
+
+def test_plan_defaults_headline_font_alternation_to_none_when_unconfirmed() -> None:
+    profile = _make_profile()
+    manifest = _manifest([])
+
+    plan = build_layout_plan(manifest, profile)
+
+    assert plan.headline_font_alternation is None
 
 
 def test_pages_are_sorted_by_page_number() -> None:
