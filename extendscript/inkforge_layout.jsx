@@ -11,14 +11,17 @@
  *      Text Variables документа.
  *   3. Геометричне групування кількох статей на одному розвороті
  *      (findArticleClusters) + relink фото за знайденими кластерами
- *      (applyArticlesToPage) — ЛИШЕ для газет із розв'язаною мапою
- *      paragraph_style_roles (наразі тільки MIF; див.
- *      docs/architecture.md, "Групування кількох статей..."). Алгоритм
- *      перевірено на офлайн-аналізі IDML (samples/article_clusters.py,
- *      не в git), але НЕ на реальному InDesign — тому діє захисний
- *      принцип "не вгадувати": якщо кількість знайдених кластерів не
- *      збігається з кількістю запланованих статей, сторінка пропускається
- *      без жодних змін.
+  *      (applyArticlesToPage) — коли є розв'язана мапа
+  *      paragraph_style_roles (наразі MIF; див. docs/architecture.md,
+  *      "Групування кількох статей...") АБО, якщо її немає,
+  *      character_size_roles як fallback-класифікація ролі фрейму за
+  *      character-level розміром шрифту (лише бінарний headline/body,
+  *      наразі Духовність; див. resolveRoleByCharacterSize нижче).
+  *      Алгоритм перевірено на офлайн-аналізі IDML
+  *      (samples/article_clusters.py, не в git), але НЕ на реальному
+  *      InDesign — тому діє захисний принцип "не вгадувати": якщо
+  *      кількість знайдених кластерів не збігається з кількістю
+  *      запланованих статей, сторінка пропускається без жодних змін.
  *   4. Вставка реального тексту заголовка/ліда/тіла статті у знайдені
  *      фрейми (за роллю headline/lead_intro/body у кожному кластері),
  *      джерело — структурований розбір .docx/.txt у Рівні 1
@@ -46,9 +49,10 @@
  *     пріоритет дій (зменшити фото → прибрати фото → ручне втручання)
  *     потребує підтвердження у верстальниці (див.
  *     docs/architecture.md, "Відкриті питання").
- *   - Духовність досі без мапи paragraph_style_roles, тому групування
- *     статей і все з нього залежне (relink фото, вставка тексту,
- *     fitFrameText) там взагалі не застосовується.
+ *   - Духовність: character_size_roles дає лише бінарний headline/body —
+  *     градація підзаголовок/кікер/лід (lead_intro) для цієї газети
+  *     невідома, тому lead-фрейм там просто не заповнюється (немає такої
+  *     ролі), а не вгадується.
  *
  * Вхід: шлях до layout_plan.json (записаного `inkforge-plan`) і шлях до
  * файла-основи (.indd попереднього випуску цієї газети).
@@ -220,15 +224,62 @@ function xOverlap(a0, a1, b0, b1) {
 }
 
 /**
+ * Fallback-класифікація ролі текстового фрейму за character-level
+ * розміром шрифту (profiles/*.yaml поле `character_size_roles`) -- для
+ * газет без надійної мапи `paragraph_style_roles` (наразі Духовність, див.
+ * docs/architecture.md). Підтверджено лише БІНАРНИЙ поділ: "headline"
+ * (переважає символів із pointSize >= headline_like_point_size_min) чи
+ * "body" (переважає символів із pointSize <= body_point_size_max); якщо
+ * жодна група символів не переважає (або фрейм порожній) -- повертає null,
+ * не вгадуємо. Рахуємо саме символи (не абзаци/textStyleRange), щоб
+ * короткий заголовок великим кеглем не програвав довшому тілу тексту
+ * дрібним кеглем. Припущення (не перевірене на реальному InDesign):
+ * заголовок і тіло статті лежать у РІЗНИХ текстових фреймах -- те саме
+ * припущення, на якому вже стоїть уся роль-система для MIF.
+ */
+function resolveRoleByCharacterSize(tf, sizeRoles) {
+    var bodyMax = sizeRoles.body_point_size_max;
+    var headlineMin = sizeRoles.headline_like_point_size_min;
+    if (typeof bodyMax !== "number" || typeof headlineMin !== "number") {
+        return null;
+    }
+
+    var bodyChars = 0;
+    var headlineChars = 0;
+    try {
+        var ranges = tf.parentStory.textStyleRanges.everyItem().getElements();
+        for (var i = 0; i < ranges.length; i++) {
+            var size = ranges[i].pointSize;
+            var len = ranges[i].characters.length;
+            if (size <= bodyMax) {
+                bodyChars += len;
+            } else if (size >= headlineMin) {
+                headlineChars += len;
+            }
+        }
+    } catch (e) {
+        return null;
+    }
+
+    if (headlineChars === 0 && bodyChars === 0) {
+        return null;
+    }
+    return headlineChars > bodyChars ? "headline" : "body";
+}
+
+/**
  * Збирає всі текстові й графічні фрейми, розміщені на цій сторінці (сама
  * модель InDesign вже коректно прив'язує елементи до сторінки -- на
  * відміну від ручного парсингу IDML-XML, тут не потрібен окремий фільтр
  * "сміття на монтажному столі", InDesign сам його не поверне в page.*).
  * Повертає масив {item, kind, role, bounds}; role може бути null (не
  * підтримувана роль -- фрейм ігнорується подальшою кластеризацією, але
- * лишається в списку для діагностики).
+ * лишається в списку для діагностики). "sizeRoles" (profiles/*.yaml поле
+ * `character_size_roles`) -- опціональний fallback, коли роль за стилем
+ * абзацу не визначилась (null/невідомий стиль); передайте null, щоб його
+ * не використовувати.
  */
-function collectPageFrames(page, styleToRole) {
+function collectPageFrames(page, styleToRole, sizeRoles) {
     var frames = [];
 
     var textFrames = page.textFrames.everyItem().getElements();
@@ -241,6 +292,9 @@ function collectPageFrames(page, styleToRole) {
             }
         } catch (e) {
             role = null;
+        }
+        if (role === null && sizeRoles) {
+            role = resolveRoleByCharacterSize(tf, sizeRoles);
         }
         frames.push({ item: tf, kind: "text", role: role, bounds: itemBounds(tf) });
     }
@@ -274,8 +328,8 @@ function collectPageFrames(page, styleToRole) {
  * (згори вниз, потім зліва направо); "members" містить решту фреймів
  * (лід/тіло/фото), приписаних до цього заголовка.
  */
-function findArticleClusters(page, styleToRole) {
-    var frames = collectPageFrames(page, styleToRole);
+function findArticleClusters(page, styleToRole, sizeRoles) {
+    var frames = collectPageFrames(page, styleToRole, sizeRoles);
 
     var headlines = [];
     for (var i = 0; i < frames.length; i++) {
@@ -478,17 +532,23 @@ function applyHeadlineFontAlternation(item, plan, articleIndex, pageNumber, slug
  * змін, а не затирається порожнім текстом.
  */
 function applyArticlesToPage(page, pagePlan, plan) {
-    if (!plan.paragraph_style_roles || typeof plan.paragraph_style_roles !== "object") {
+    var hasStyleRoles = plan.paragraph_style_roles && typeof plan.paragraph_style_roles === "object";
+    var hasSizeRoles = plan.character_size_roles && typeof plan.character_size_roles === "object" &&
+        typeof plan.character_size_roles.body_point_size_max === "number" &&
+        typeof plan.character_size_roles.headline_like_point_size_min === "number";
+
+    if (!hasStyleRoles && !hasSizeRoles) {
         $.writeln(
-            "[Рівень 2] Сторінка " + pagePlan.page + ": paragraph_style_roles для газети '" +
-            plan.newspaper_id + "' ще не розв'язано (\"TBD\") -- групування статей і relink " +
-            "фото пропущено для цієї сторінки."
+            "[Рівень 2] Сторінка " + pagePlan.page + ": ні paragraph_style_roles, ні " +
+            "character_size_roles для газети '" + plan.newspaper_id + "' не розв'язано -- " +
+            "групування статей і relink фото пропущено для цієї сторінки."
         );
         return;
     }
 
-    var styleToRole = buildStyleToRoleMap(plan.paragraph_style_roles);
-    var clusters = findArticleClusters(page, styleToRole);
+    var styleToRole = hasStyleRoles ? buildStyleToRoleMap(plan.paragraph_style_roles) : {};
+    var sizeRoles = hasSizeRoles ? plan.character_size_roles : null;
+    var clusters = findArticleClusters(page, styleToRole, sizeRoles);
 
     if (clusters.length !== pagePlan.articles.length) {
         $.writeln(
@@ -617,8 +677,8 @@ function main() {
         "Готово (частково): preflight шрифтів, колонтитул, геометричне групування статей, " +
         "relink фото, вставка тексту заголовка/ліда/тіла, підтискання overset-тексту " +
         "(Horizontal Scale) та чергування шрифту заголовка (де підтверджено) виконано для " +
-        "газет із розв'язаною мапою ролей (paragraph_style_roles); перевірка на реальному " +
-        "InDesign ще потрібна."
+        "газет із розв'язаною мапою ролей (paragraph_style_roles або, як fallback, " +
+        "character_size_roles); перевірка на реальному InDesign ще потрібна."
     );
 }
 
