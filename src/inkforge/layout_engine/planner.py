@@ -36,6 +36,9 @@ class ArticlePlan:
     image_color_mode: str | None
     text_path: str | None = None
     image_path: str | None = None
+    title: str = ""
+    lead: str = ""
+    body: str = ""
 
 
 @dataclass
@@ -160,6 +163,9 @@ def _plan_for_page(
             image_color_mode=color_mode,
             text_path=article.get("text_path"),
             image_path=article.get("image_path"),
+            title=article.get("title") or "",
+            lead=article.get("lead") or "",
+            body=article.get("body") or "",
         )
         for article in articles_raw
     ]
