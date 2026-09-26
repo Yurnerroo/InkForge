@@ -23,6 +23,7 @@ def _profile() -> NewspaperProfile:
         photo_links=PhotoLinks(storage="linked", naming_pattern="Links/{page}.{ext}"),
         paragraph_styles_found=["Body"],
         paragraph_style_roles={"body": ["Body"]},
+        character_size_roles=None,
         special_pages=[],
         fonts_installed=["Arial"],
         fonts_substituted=[],
@@ -64,3 +65,4 @@ def test_write_layout_plan_produces_valid_json(tmp_path: Path) -> None:
     assert data["pages"][0]["articles"][0]["article_id"] == "2_1_a"
     assert data["pages"][0]["articles"][0]["text_path"] == "/tmp/issue/2/2_1_a.docx"
     assert data["paragraph_style_roles"] == {"body": ["Body"]}
+    assert data["character_size_roles"] is None

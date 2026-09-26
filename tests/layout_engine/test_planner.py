@@ -24,6 +24,7 @@ def _make_profile(**overrides: Any) -> NewspaperProfile:
         photo_links=PhotoLinks(storage="linked", naming_pattern="Links/{page}.{ext}"),
         paragraph_styles_found=["Body"],
         paragraph_style_roles={"body": ["Body"]},
+        character_size_roles=None,
         special_pages=[],
         fonts_installed=["Arial"],
         fonts_substituted=[],
@@ -191,6 +192,32 @@ def test_plan_carries_tbd_paragraph_style_roles_as_is() -> None:
     plan = build_layout_plan(manifest, profile)
 
     assert plan.paragraph_style_roles == "TBD"
+
+
+def test_plan_carries_character_size_roles_fallback() -> None:
+    """Dyhovnist-style profiles pass character_size_roles through unchanged
+    when paragraph_style_roles is unusable."""
+
+    fallback = {
+        "method": "character_point_size",
+        "body_point_size_max": 11,
+        "headline_like_point_size_min": 13,
+    }
+    profile = _make_profile(paragraph_style_roles="TBD", character_size_roles=fallback)
+    manifest = _manifest([])
+
+    plan = build_layout_plan(manifest, profile)
+
+    assert plan.character_size_roles == fallback
+
+
+def test_plan_defaults_character_size_roles_to_none_when_not_needed() -> None:
+    profile = _make_profile()
+    manifest = _manifest([])
+
+    plan = build_layout_plan(manifest, profile)
+
+    assert plan.character_size_roles is None
 
 
 def test_pages_are_sorted_by_page_number() -> None:
