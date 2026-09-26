@@ -124,6 +124,9 @@ project and its intended end user:
   stack, findings from real IDML sample analysis, open questions.
 - [docs/content-structure.md](docs/content-structure.md) — folder/file
   convention for a weekly issue.
+- [docs/first-run-checklist.md](docs/first-run-checklist.md) (Ukrainian) —
+  step-by-step checklist for the layout person's first real run on
+  Windows + InDesign.
 - [Українська версія цього README](README.uk.md).
 
 ## License
