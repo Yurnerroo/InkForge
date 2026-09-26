@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .docreader import read_text_metrics
+from .docreader import read_text_metrics_multi
 from .imagereader import read_image_info
 from .models import ArticleContent, IssueContent, PageContent
 
@@ -84,55 +84,84 @@ def _scan_page_folder(folder: Path) -> PageContent:
             )
             continue
 
-        article = ArticleContent(
-            page=folder.name,
-            order=int(match.group("order")),
-            slug=match.group("slug"),
-            text_path=files.get("text"),
-            image_path=files.get("image"),
-        )
-
+        order = int(match.group("order"))
+        slug = match.group("slug")
         stem_page = match.group("page")
+
+        base_warnings: list[str] = []
         try:
             if int(stem_page) != int(folder.name):
-                article.warnings.append(
+                base_warnings.append(
                     f"File prefix page '{stem_page}' differs from folder page '{folder.name}'"
                 )
         except ValueError:
-            article.warnings.append(
+            base_warnings.append(
                 f"Could not compare file prefix page '{stem_page}' with folder page '{folder.name}'"
             )
 
-        if article.order in seen_orders:
-            article.warnings.append(
-                f"Duplicate article order {article.order} on this page "
-                f"(also used by '{seen_orders[article.order]}')"
+        if order in seen_orders:
+            base_warnings.append(
+                f"Duplicate article order {order} on this page (also used by '{seen_orders[order]}')"
             )
         else:
-            seen_orders[article.order] = stem
+            seen_orders[order] = stem
 
-        if article.text_path is None:
-            article.warnings.append("Photo found without a matching text file")
-        else:
-            text = read_text_metrics(article.text_path)
-            article.title = text.title
-            article.lead = text.lead
-            article.body = text.body
-            article.word_count = text.word_count
-            article.char_count = text.char_count
-            article.has_lead_paragraph = text.has_lead_paragraph
-            article.warnings.extend(text.warnings)
-
-        if article.image_path is not None:
-            article.image_info = read_image_info(article.image_path)
-            if article.image_info is None:
-                article.warnings.append(
-                    f"Could not read image file: {article.image_path.name}"
-                )
+        image_path = files.get("image")
+        image_info = None
+        image_warnings: list[str] = []
+        if image_path is not None:
+            image_info = read_image_info(image_path)
+            if image_info is None:
+                image_warnings.append(f"Could not read image file: {image_path.name}")
             else:
-                article.warnings.extend(article.image_info.warnings)
+                image_warnings.extend(image_info.warnings)
 
-        page.articles.append(article)
+        text_path = files.get("text")
+        if text_path is None:
+            article = ArticleContent(
+                page=folder.name,
+                order=order,
+                slug=slug,
+                image_path=image_path,
+                image_info=image_info,
+            )
+            article.warnings.extend(base_warnings)
+            article.warnings.append("Photo found without a matching text file")
+            article.warnings.extend(image_warnings)
+            page.articles.append(article)
+            continue
 
-    page.articles.sort(key=lambda a: a.order)
+        texts = read_text_metrics_multi(text_path)
+        multi = len(texts) > 1
+        for sub_order, text in enumerate(texts):
+            # The shared photo file (if any) is only attached to the first
+            # split article -- we don't know which one it actually depicts,
+            # so we don't guess by attaching it to all of them.
+            is_first = sub_order == 0
+            article = ArticleContent(
+                page=folder.name,
+                order=order,
+                slug=slug,
+                sub_order=sub_order,
+                text_path=text_path,
+                image_path=image_path if is_first else None,
+                image_info=image_info if is_first else None,
+                title=text.title,
+                lead=text.lead,
+                body=text.body,
+                word_count=text.word_count,
+                char_count=text.char_count,
+                has_lead_paragraph=text.has_lead_paragraph,
+            )
+            article.warnings.extend(base_warnings)
+            article.warnings.extend(text.warnings)
+            if is_first:
+                article.warnings.extend(image_warnings)
+            if multi:
+                article.warnings.append(
+                    f"Split from a multi-article file (part {sub_order + 1} of {len(texts)})"
+                )
+            page.articles.append(article)
+
+    page.articles.sort(key=lambda a: (a.order, a.sub_order))
     return page

@@ -34,6 +34,7 @@ class ArticlePlan:
     has_image: bool
     text_share: float
     image_color_mode: str | None
+    sub_order: int = 0
     text_path: str | None = None
     image_path: str | None = None
     title: str = ""
@@ -167,6 +168,7 @@ def _plan_for_page(
             has_image=article.get("image") is not None,
             text_share=round(max(article.get("word_count", 0) or 0, 0) / total_words, 4),
             image_color_mode=color_mode,
+            sub_order=article.get("sub_order", 0) or 0,
             text_path=article.get("text_path"),
             image_path=article.get("image_path"),
             title=article.get("title") or "",

@@ -20,6 +20,7 @@ def test_build_manifest_serializes_pages_and_articles(tmp_path: Path) -> None:
     assert article["article_id"] == "01_1_lider"
     assert article["word_count"] == 3
     assert article["image"] is None
+    assert article["sub_order"] == 0
 
 
 def test_build_manifest_includes_warnings(tmp_path: Path) -> None:

@@ -25,6 +25,11 @@ class ArticleContent:
     page: str
     order: int
     slug: str
+    sub_order: int = 0
+    """Disambiguates multiple articles split out of one source file that
+    share the same ``order`` (see docs/content-structure.md, "Кілька
+    статей в одному файлі"). 0 for the (overwhelmingly common) case of one
+    article per file."""
     text_path: Path | None = None
     image_path: Path | None = None
     image_info: ImageInfo | None = None
@@ -38,7 +43,8 @@ class ArticleContent:
 
     @property
     def article_id(self) -> str:
-        return f"{self.page}_{self.order}_{self.slug}"
+        base = f"{self.page}_{self.order}_{self.slug}"
+        return base if self.sub_order == 0 else f"{base}_{self.sub_order}"
 
 
 @dataclass
