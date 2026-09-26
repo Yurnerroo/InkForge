@@ -55,6 +55,7 @@ def test_load_profile_parses_all_fields(tmp_path: Path) -> None:
     assert profile.spreads[0].color_mode == "grayscale"
     assert profile.photo_links.storage == "linked"
     assert profile.cmyk_profile is None
+    assert profile.character_size_roles is None
 
 
 def test_color_mode_for_page(tmp_path: Path) -> None:
@@ -119,3 +120,15 @@ def test_real_profiles_load_successfully(newspaper_id: str) -> None:
         assert spread.color_mode in {"grayscale", "cmyk", "mixed"}
     for page in profile.manual_pages:
         assert 1 <= page <= profile.page_count
+
+
+def test_dyhovnist_profile_carries_character_size_roles_fallback() -> None:
+    """Dyhovnist has no reliable paragraph_style_roles, so it must fall back
+    to character_size_roles (see profiles/dyhovnist.yaml notes)."""
+
+    profile = load_profile_by_id("dyhovnist", PROFILES_DIR)
+
+    assert profile.paragraph_style_roles == "TBD"
+    assert profile.character_size_roles is not None
+    assert profile.character_size_roles["method"] == "character_point_size"
+    assert profile.character_size_roles["body_point_size_max"] < profile.character_size_roles["headline_like_point_size_min"]
