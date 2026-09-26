@@ -107,3 +107,74 @@ def test_successful_run_sets_script_args_and_calls_doscript(
         "issueDate": "2026-10-01",
         "issueNumber": "40",
     }
+
+
+def test_export_pdf_missing_plan_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _install_fake_win32com(monkeypatch)
+    script_path = tmp_path / "export.jsx"
+    script_path.write_text("", encoding="utf-8")
+
+    with pytest.raises(indesign_bridge.IndesignBridgeError, match="layout_plan.json"):
+        indesign_bridge.run_export_pdf_script(
+            tmp_path / "missing_plan.json", tmp_path / "out.pdf", script_path
+        )
+
+
+def test_export_pdf_missing_indd_fallback_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_fake_win32com(monkeypatch)
+    plan_path = tmp_path / "layout_plan.json"
+    plan_path.write_text("{}", encoding="utf-8")
+    script_path = tmp_path / "export.jsx"
+    script_path.write_text("", encoding="utf-8")
+
+    with pytest.raises(indesign_bridge.IndesignBridgeError, match="indd"):
+        indesign_bridge.run_export_pdf_script(
+            plan_path,
+            tmp_path / "out.pdf",
+            script_path,
+            indd_path=tmp_path / "missing.indd",
+        )
+
+
+def test_export_pdf_successful_run_sets_script_args_and_calls_doscript(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fake_client = _install_fake_win32com(monkeypatch)
+
+    plan_path = tmp_path / "layout_plan.json"
+    plan_path.write_text('{"cmyk_profile": "ISOnewspaper26v4"}', encoding="utf-8")
+    script_path = tmp_path / "export.jsx"
+    script_path.write_text("", encoding="utf-8")
+    pdf_path = tmp_path / "out.pdf"
+
+    set_values: dict[str, str] = {}
+
+    class FakeScriptArgs:
+        def SetValue(self, key: str, value: str) -> None:  # noqa: N802 - COM naming
+            set_values[key] = value
+
+    class FakeApp:
+        ScriptArgs = FakeScriptArgs()
+
+        def DoScript(self, script: str, language: object) -> str:  # noqa: N802
+            assert script == str(script_path)
+            return "OK: 1 page"
+
+    fake_client.gencache = types.SimpleNamespace(EnsureDispatch=lambda _name: FakeApp())
+    fake_client.constants = types.SimpleNamespace(idJavascript="javascript")
+
+    result = indesign_bridge.run_export_pdf_script(
+        plan_path,
+        pdf_path,
+        script_path,
+        preset_name="[PDF/X-1a:2001]",
+    )
+
+    assert result == "OK: 1 page"
+    assert set_values == {
+        "planPath": str(plan_path),
+        "pdfPath": str(pdf_path),
+        "presetName": "[PDF/X-1a:2001]",
+    }

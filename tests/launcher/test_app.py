@@ -46,7 +46,11 @@ def _make_client(tmp_path: Path) -> TestClient:
     profiles_dir = tmp_path / "profiles"
     profiles_dir.mkdir()
     (profiles_dir / "test_gazeta.yaml").write_text(PROFILE_YAML, encoding="utf-8")
-    app = create_app(profiles_dir=profiles_dir, script_path=tmp_path / "no_such_script.jsx")
+    app = create_app(
+        profiles_dir=profiles_dir,
+        script_path=tmp_path / "no_such_script.jsx",
+        pdf_script_path=tmp_path / "no_such_pdf_script.jsx",
+    )
     return TestClient(app)
 
 
@@ -146,6 +150,44 @@ def test_execute_after_plan_fails_gracefully_without_indesign(tmp_path: Path) ->
             "issue_folder": str(issue_dir),
             "profile": "test_gazeta",
             "indd_path": str(issue_dir / "does_not_exist.indd"),
+        },
+    )
+
+    assert response.status_code == 502
+
+
+def test_export_pdf_without_plan_returns_400(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+    issue_dir = _make_issue(tmp_path)
+
+    response = client.post(
+        "/api/export_pdf",
+        json={
+            "issue_folder": str(issue_dir),
+            "profile": "test_gazeta",
+            "pdf_path": str(issue_dir / "out.pdf"),
+        },
+    )
+
+    assert response.status_code == 400
+    assert "layout_plan.json" in response.json()["detail"]
+
+
+def test_export_pdf_after_plan_fails_gracefully_without_indesign(tmp_path: Path) -> None:
+    """Same honest assertion as test_execute_after_plan_fails_gracefully_without_indesign,
+    but for /api/export_pdf (Рівень 3, крок 5)."""
+
+    client = _make_client(tmp_path)
+    issue_dir = _make_issue(tmp_path)
+    client.post("/api/check", json={"issue_folder": str(issue_dir), "profile": "test_gazeta"})
+    client.post("/api/plan", json={"issue_folder": str(issue_dir), "profile": "test_gazeta"})
+
+    response = client.post(
+        "/api/export_pdf",
+        json={
+            "issue_folder": str(issue_dir),
+            "profile": "test_gazeta",
+            "pdf_path": str(issue_dir / "out.pdf"),
         },
     )
 

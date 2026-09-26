@@ -38,6 +38,12 @@
 
     <label for="issueNumber">Номер випуску (необов'язково)</label>
     <input id="issueNumber" type="text" placeholder="40" />
+
+    <label for="pdfPath">Куди зберегти друк-PDF (для кроку 4)</label>
+    <input id="pdfPath" type="text" placeholder="C:\...\2026-W40_gazeta-x\gazeta-x.pdf" />
+
+    <label for="presetName">Пресет PDF-експорту (необов'язково)</label>
+    <input id="presetName" type="text" placeholder="[PDF/X-1a:2001]" />
   </fieldset>
 
   <div class="step">
@@ -51,6 +57,13 @@
   <div class="step">
     <button id="btnExecute" disabled>3. Зверстати в InDesign</button>
     <span id="statusExecute" class="status"></span>
+  </div>
+  <p style="font-size: 0.85rem; color: #555;">
+    Тут — ручне доправлення в самому InDesign (обов'язковий крок, не автоматизується).
+  </p>
+  <div class="step">
+    <button id="btnExportPdf" disabled>4. Експорт друк-PDF</button>
+    <span id="statusExportPdf" class="status"></span>
   </div>
 
   <pre id="output" hidden></pre>
@@ -136,8 +149,30 @@ document.getElementById("btnExecute").addEventListener("click", async () => {
     });
     setStatus("statusExecute", true, "OK — див. вивід нижче");
     showOutput(data);
+    document.getElementById("btnExportPdf").disabled = false;
   } catch (e) {
     setStatus("statusExecute", false, e.message);
+  }
+});
+
+document.getElementById("btnExportPdf").addEventListener("click", async () => {
+  const issueFolder = document.getElementById("issueFolder").value;
+  const profile = document.getElementById("profile").value;
+  const inddPath = document.getElementById("inddPath").value || null;
+  const pdfPath = document.getElementById("pdfPath").value;
+  const presetName = document.getElementById("presetName").value || null;
+  try {
+    const data = await postJson("/api/export_pdf", {
+      issue_folder: issueFolder,
+      profile,
+      indd_path: inddPath,
+      pdf_path: pdfPath,
+      preset_name: presetName,
+    });
+    setStatus("statusExportPdf", true, `OK — збережено ${data.pdf_path}`);
+    showOutput(data);
+  } catch (e) {
+    setStatus("statusExportPdf", false, e.message);
   }
 });
 
