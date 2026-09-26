@@ -51,12 +51,19 @@ override, щоб знайти механізм розрізнення загол
 лише агреговані метрики — тоді `applyArticlesToPage()` зможе вставляти
 реальний текст у вже правильно знайдені фрейми.
 
-## Як (у майбутньому) запускати вручну
+## Як запускати
 
+**Вручну (без Рівня 3):**
 1. У Python: `inkforge-check` → `manifest.json`, потім `inkforge-plan
    manifest.json --profile <id>` → `layout_plan.json`.
 2. У InDesign: `Window > Utilities > Scripts` → User → запустити
    `inkforge_layout.jsx`.
 3. Скрипт запитає файл-основу (`.indd` попереднього випуску) і
-   `layout_plan.json` через діалог вибору файлу (або читає їх з
-   `app.scriptArgs`, якщо їх передасть майбутній Рівень 3 GUI-launcher).
+   `layout_plan.json` через діалог вибору файлу.
+
+**Через Рівень 3 (`inkforge-launcher`, Windows-only):** кнопка "Зверстати в
+InDesign" сама проставляє `app.scriptArgs` (`docPath`, `planPath`,
+`issueDate`, `issueNumber`) і запускає цей скрипт через COM — без ручного
+відкриття діалогів і без перемикання в InDesign. Див.
+`src/inkforge/launcher/indesign_bridge.py` і `docs/architecture.md`, розділ
+"Рівень 3" (COM-крок так само не перевірений на реальному InDesign).

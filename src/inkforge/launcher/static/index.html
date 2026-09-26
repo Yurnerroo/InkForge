@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8" />
+<title>InkForge — Launcher</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 780px; margin: 2rem auto; color: #1a1a1a; }
+  h1 { font-size: 1.4rem; }
+  fieldset { border: 1px solid #ccc; border-radius: 8px; padding: 1rem 1.2rem; margin-bottom: 1rem; }
+  label { display: block; margin-top: 0.6rem; font-weight: 600; }
+  input, select { width: 100%; padding: 0.4rem; margin-top: 0.2rem; box-sizing: border-box; }
+  .step { display: flex; align-items: center; gap: 0.8rem; margin-top: 0.8rem; }
+  button { padding: 0.5rem 1rem; cursor: pointer; }
+  button:disabled { cursor: not-allowed; opacity: 0.5; }
+  .status { font-size: 0.9rem; }
+  .status.ok { color: #16794a; }
+  .status.err { color: #b3261e; white-space: pre-wrap; }
+  pre { background: #f5f5f5; padding: 0.6rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+  <h1>InkForge — Launcher (Рівень 3)</h1>
+  <p>Кожен крок — окрема кнопка. Наступний крок вмикається лише після успіху попереднього.</p>
+
+  <fieldset>
+    <legend>Випуск</legend>
+    <label for="profile">Газета</label>
+    <select id="profile"></select>
+
+    <label for="issueFolder">Папка тижневого випуску</label>
+    <input id="issueFolder" type="text" placeholder="C:\...\2026-W40_gazeta-x" />
+
+    <label for="inddPath">Файл-основа .indd цього випуску</label>
+    <input id="inddPath" type="text" placeholder="C:\...\2026-W40_gazeta-x\gazeta-x.indd" />
+
+    <label for="issueDate">Дата випуску (необов'язково)</label>
+    <input id="issueDate" type="text" placeholder="2026-10-01" />
+
+    <label for="issueNumber">Номер випуску (необов'язково)</label>
+    <input id="issueNumber" type="text" placeholder="40" />
+  </fieldset>
+
+  <div class="step">
+    <button id="btnCheck">1. Перевірити контент</button>
+    <span id="statusCheck" class="status"></span>
+  </div>
+  <div class="step">
+    <button id="btnPlan" disabled>2. Побудувати план верстки</button>
+    <span id="statusPlan" class="status"></span>
+  </div>
+  <div class="step">
+    <button id="btnExecute" disabled>3. Зверстати в InDesign</button>
+    <span id="statusExecute" class="status"></span>
+  </div>
+
+  <pre id="output" hidden></pre>
+
+<script>
+async function loadProfiles() {
+  const res = await fetch("/api/profiles");
+  const data = await res.json();
+  const select = document.getElementById("profile");
+  select.innerHTML = "";
+  for (const id of data.profiles) {
+    const opt = document.createElement("option");
+    opt.value = id;
+    opt.textContent = id;
+    select.appendChild(opt);
+  }
+}
+
+function setStatus(elId, ok, text) {
+  const el = document.getElementById(elId);
+  el.textContent = text;
+  el.className = "status " + (ok ? "ok" : "err");
+}
+
+function showOutput(data) {
+  const pre = document.getElementById("output");
+  pre.hidden = false;
+  pre.textContent = JSON.stringify(data, null, 2);
+}
+
+async function postJson(url, body) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail || "Невідома помилка");
+  }
+  return data;
+}
+
+document.getElementById("btnCheck").addEventListener("click", async () => {
+  const issueFolder = document.getElementById("issueFolder").value;
+  const profile = document.getElementById("profile").value;
+  try {
+    const data = await postJson("/api/check", { issue_folder: issueFolder, profile });
+    setStatus("statusCheck", true, `OK — ${data.pages.length} стор., ${data.warnings.length} попереджень`);
+    showOutput(data);
+    document.getElementById("btnPlan").disabled = false;
+  } catch (e) {
+    setStatus("statusCheck", false, e.message);
+  }
+});
+
+document.getElementById("btnPlan").addEventListener("click", async () => {
+  const issueFolder = document.getElementById("issueFolder").value;
+  const profile = document.getElementById("profile").value;
+  try {
+    const data = await postJson("/api/plan", { issue_folder: issueFolder, profile });
+    setStatus("statusPlan", true, `OK — ${data.pages.length} стор. у плані, ${data.warnings.length} попереджень`);
+    showOutput(data);
+    document.getElementById("btnExecute").disabled = false;
+  } catch (e) {
+    setStatus("statusPlan", false, e.message);
+  }
+});
+
+document.getElementById("btnExecute").addEventListener("click", async () => {
+  const issueFolder = document.getElementById("issueFolder").value;
+  const profile = document.getElementById("profile").value;
+  const inddPath = document.getElementById("inddPath").value;
+  const issueDate = document.getElementById("issueDate").value || null;
+  const issueNumber = document.getElementById("issueNumber").value || null;
+  try {
+    const data = await postJson("/api/execute", {
+      issue_folder: issueFolder,
+      profile,
+      indd_path: inddPath,
+      issue_date: issueDate,
+      issue_number: issueNumber,
+    });
+    setStatus("statusExecute", true, "OK — див. вивід нижче");
+    showOutput(data);
+  } catch (e) {
+    setStatus("statusExecute", false, e.message);
+  }
+});
+
+loadProfiles();
+</script>
+</body>
+</html>

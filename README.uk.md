@@ -4,7 +4,7 @@
 
 Автоматизація верстки щотижневої газети в Adobe InDesign — від перевірки контенту до готового друк-PDF у кілька кліків.
 
-> Статус: **Рівень 1 (Content Checker) готовий**. Рівень 2 (планувальник верстки) — Python-частина (`inkforge-plan`) готова й покрита тестами; ExtendScript-виконавець для InDesign — чорновий, ще не перевірений на реальному документі (див. [extendscript/README.md](extendscript/README.md)).
+> Статус: **Рівень 1 (Content Checker) готовий**. Рівень 2 (планувальник верстки) — Python-частина (`inkforge-plan`) готова й покрита тестами; ExtendScript-виконавець для InDesign — частковий (геометричне групування статей + relink фото для MIF), ще не перевірений на реальному документі (див. [extendscript/README.md](extendscript/README.md)). Рівень 3 (One-Click Launcher, FastAPI) — каркас готовий і покритий тестами; крок керування InDesign через COM ще не перевірений наживо.
 
 ## Для кого
 
@@ -29,7 +29,8 @@ profiles/                 по одному YAML-профілю на газет�
 src/inkforge/
   content_checker/        Рівень 1: сканування випуску, побудова manifest.json
   layout_engine/          Рівень 2 (Python-частина): manifest.json + профіль -> layout_plan.json
-extendscript/              Рівень 2 (InDesign-частина): виконавець layout_plan.json (чорновий)
+  launcher/               Рівень 3: FastAPI-застосунок, що керує Рівнями 1-2 і InDesign
+extendscript/              Рівень 2 (InDesign-частина): виконавець layout_plan.json (частковий)
 tests/                    pytest-тести для Python-частини
 ```
 
@@ -59,6 +60,23 @@ Python-частина читає `manifest.json` (з Рівня 1) і профі
 ```bash
 inkforge-plan path/to/2026-W40_gazeta-x/manifest.json --profile ty_i_ya
 ```
+
+## Рівень 3: One-Click Launcher
+
+Локальний веб-застосунок на FastAPI, що об'єднує Рівні 1-2 і (за наявності
+Windows+InDesign) сам керує InDesign через COM — одна сторінка з кнопками
+"Перевірити контент" → "Побудувати план" → "Зверстати в InDesign". Деталі —
+[docs/architecture.md](docs/architecture.md), розділ "Рівень 3".
+
+```bash
+pip install -e ".[launcher]"
+inkforge-launcher
+```
+
+Відкриє `http://127.0.0.1:8765` у браузері. Кроки "Перевірити контент" і
+"Побудувати план" не залежать від InDesign і повністю покриті тестами; крок
+"Зверстати в InDesign" (COM-автоматизація) ще не перевірений на реальному
+InDesign-встановленні.
 
 Запуск тестів:
 
