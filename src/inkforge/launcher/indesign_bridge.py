@@ -41,6 +41,71 @@ def _win32com_client():
     return win32com.client
 
 
+def _find_indesign_prog_ids() -> list[str]:
+    """Перелічує ``HKEY_CLASSES_ROOT`` у пошуку версійних ProgID InDesign
+    (напр. ``InDesign.Application.2026``), від новішого до старшого.
+
+    **Підтверджено на реальній машині верстальниці** (не лише гіпотеза):
+    деякі встановлення InDesign реєструють лише версійний ProgID, без
+    родового ``InDesign.Application`` — саме тому ``EnsureDispatch`` на
+    ньому падає з ``(-2147221005, 'Invalid class string', ...)``. Повертає
+    порожній список за будь-якої помилки (немає ``winreg``, не Windows,
+    нічого не знайдено), щоб виклик міг спокійно впасти на явну помилку.
+    """
+    try:
+        import winreg
+    except ImportError:  # pragma: no cover - лише не-Windows
+        return []
+
+    found: list[str] = []
+    try:
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "") as root:
+            index = 0
+            while True:
+                try:
+                    name = winreg.EnumKey(root, index)
+                except OSError:
+                    break
+                index += 1
+                if name.startswith("InDesign.Application."):
+                    found.append(name)
+    except OSError:  # pragma: no cover - потребує реального реєстру Windows
+        return []
+
+    found.sort(reverse=True)
+    return found
+
+
+def _connect_to_indesign(win32com):
+    """Підключається до InDesign через COM: спершу родовий ProgID
+    ``InDesign.Application``, потім, якщо він не зареєстрований (див.
+    ``_find_indesign_prog_ids``), — версійні ProgID від новішого до
+    старшого. Кидає ``IndesignBridgeError`` зі списком усього спробуваного,
+    якщо жоден варіант не спрацював.
+    """
+    errors: dict[str, str] = {}
+    try:
+        return win32com.gencache.EnsureDispatch("InDesign.Application")
+    except Exception as exc:  # noqa: BLE001 - точний тип COM-помилки залежить від встановлення
+        errors["InDesign.Application"] = str(exc)
+
+    for prog_id in _find_indesign_prog_ids():
+        try:
+            return win32com.gencache.EnsureDispatch(prog_id)
+        except Exception as exc:  # noqa: BLE001
+            errors[prog_id] = str(exc)
+
+    tried = ", ".join(errors) if errors else "InDesign.Application"
+    details = "; ".join(f"{name}: {msg}" for name, msg in errors.items())
+    raise IndesignBridgeError(
+        f"Не вдалося підключитися до InDesign (спробувано: {tried}). "
+        f"Деталі: {details}. Перевір, що InDesign встановлено і хоч раз "
+        "відкривався вручну; якщо помилка 'Invalid class string' "
+        "повторюється для всіх варіантів — повідом розробнику точний "
+        "список спробуваних ProgID вище."
+    )
+
+
 def run_layout_script(
     indd_path: Path,
     plan_path: Path,
@@ -70,10 +135,7 @@ def run_layout_script(
     if not script_path.is_file():
         raise IndesignBridgeError(f"ExtendScript-файл не знайдено: {script_path}")
 
-    try:
-        app = win32com.gencache.EnsureDispatch("InDesign.Application")
-    except Exception as exc:  # pragma: no cover - потребує реального InDesign
-        raise IndesignBridgeError(f"Не вдалося підключитися до InDesign: {exc}") from exc
+    app = _connect_to_indesign(win32com)
 
     script_args: dict[str, str] = {
         "docPath": str(indd_path),
@@ -126,10 +188,7 @@ def run_export_pdf_script(
     if indd_path is not None and not Path(indd_path).is_file():
         raise IndesignBridgeError(f".indd файл не знайдено: {indd_path}")
 
-    try:
-        app = win32com.gencache.EnsureDispatch("InDesign.Application")
-    except Exception as exc:  # pragma: no cover - потребує реального InDesign
-        raise IndesignBridgeError(f"Не вдалося підключитися до InDesign: {exc}") from exc
+    app = _connect_to_indesign(win32com)
 
     script_args: dict[str, str] = {
         "planPath": str(plan_path),

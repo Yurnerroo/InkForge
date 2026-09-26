@@ -178,3 +178,65 @@ def test_export_pdf_successful_run_sets_script_args_and_calls_doscript(
         "pdfPath": str(pdf_path),
         "presetName": "[PDF/X-1a:2001]",
     }
+
+
+def test_connect_falls_back_to_versioned_prog_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Реальна помилка з поля: генеричний ProgID не зареєстрований, лише
+    версійний (напр. ``InDesign.Application.2026``) -- ``_connect_to_indesign``
+    має спробувати його після невдачі з генеричним."""
+    fake_client = _install_fake_win32com(monkeypatch)
+    monkeypatch.setattr(
+        indesign_bridge, "_find_indesign_prog_ids", lambda: ["InDesign.Application.2026"]
+    )
+
+    indd_path = tmp_path / "issue.indd"
+    indd_path.write_text("", encoding="utf-8")
+    plan_path = tmp_path / "layout_plan.json"
+    plan_path.write_text("{}", encoding="utf-8")
+    script_path = tmp_path / "script.jsx"
+    script_path.write_text("", encoding="utf-8")
+
+    class FakeApp:
+        ScriptArgs = types.SimpleNamespace(SetValue=lambda key, value: None)
+
+        def DoScript(self, script: str, language: object) -> str:  # noqa: N802
+            return "OK"
+
+    def fake_ensure_dispatch(prog_id: str):
+        if prog_id == "InDesign.Application":
+            raise OSError("(-2147221005, 'Invalid class string', None, None)")
+        assert prog_id == "InDesign.Application.2026"
+        return FakeApp()
+
+    fake_client.gencache = types.SimpleNamespace(EnsureDispatch=fake_ensure_dispatch)
+    fake_client.constants = types.SimpleNamespace(idJavascript="javascript")
+
+    result = indesign_bridge.run_layout_script(indd_path, plan_path, script_path)
+
+    assert result == "OK"
+
+
+def test_connect_raises_with_all_tried_prog_ids_when_none_work(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fake_client = _install_fake_win32com(monkeypatch)
+    monkeypatch.setattr(
+        indesign_bridge, "_find_indesign_prog_ids", lambda: ["InDesign.Application.2026"]
+    )
+
+    indd_path = tmp_path / "issue.indd"
+    indd_path.write_text("", encoding="utf-8")
+    plan_path = tmp_path / "layout_plan.json"
+    plan_path.write_text("{}", encoding="utf-8")
+    script_path = tmp_path / "script.jsx"
+    script_path.write_text("", encoding="utf-8")
+
+    def fake_ensure_dispatch(prog_id: str):
+        raise OSError(f"boom for {prog_id}")
+
+    fake_client.gencache = types.SimpleNamespace(EnsureDispatch=fake_ensure_dispatch)
+
+    with pytest.raises(indesign_bridge.IndesignBridgeError, match="InDesign.Application.2026"):
+        indesign_bridge.run_layout_script(indd_path, plan_path, script_path)
