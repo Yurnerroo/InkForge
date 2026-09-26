@@ -180,6 +180,8 @@ def test_plan_carries_profile_metadata_for_the_extendscript_executor() -> None:
     assert plan.cmyk_profile == "ISOnewspaper26v4"
     assert plan.fonts_substituted == ["EB Garamond"]
     assert plan.paragraph_style_roles == {"headline": ["ZAG"], "body": ["Text"]}
+    assert plan.min_horizontal_scale == 97
+    assert plan.max_horizontal_scale == 102
 
 
 def test_plan_carries_tbd_paragraph_style_roles_as_is() -> None:

@@ -63,6 +63,8 @@ class LayoutPlan:
     fonts_installed: list[str] = field(default_factory=list)
     fonts_substituted: list[str] = field(default_factory=list)
     paragraph_style_roles: dict[str, str] | str | None = None
+    min_horizontal_scale: int = MIN_HORIZONTAL_SCALE
+    max_horizontal_scale: int = MAX_HORIZONTAL_SCALE
     pages: list[PagePlan] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 

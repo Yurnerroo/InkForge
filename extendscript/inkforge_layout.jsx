@@ -25,12 +25,24 @@
  *      (content_checker.docreader). Якщо для статті title/lead/body
  *      порожні (Рівень 1 не зміг розпізнати структуру), відповідний
  *      фрейм лишається без змін, а не затирається порожнім текстом.
+ *   5. Підтискання overset-тексту (fitFrameText) — якщо вставлений текст
+ *      не поміщається у фрейм, Horizontal Scale поступово зменшується зі
+ *      100% до нижньої межі з layout_plan.json (min_horizontal_scale,
+ *      за замовчуванням 97%), як робить верстальниця вручну. Якщо текст
+ *      лишається overset навіть на межі — пишеться попередження в лог,
+ *      фрейм НЕ чіпається далі (зменшення/прибирання фото не
+ *      автоматизовано, потребує підтвердження пріоритету дій у
+ *      верстальниці).
  *
  * ЩЕ НЕ РЕАЛІЗОВАНО (навмисно, не забуто):
- *   - Динамічне додавання/видалення фреймів під новий обсяг тексту
- *     (Horizontal Scale 97-102% тощо) — Духовність досі без мапи ролей,
- *     тому групування там взагалі не застосовується (див.
+ *   - Динамічне додавання/видалення фреймів під новий обсяг тексту, коли
+ *     самого підтискання Horizontal Scale (п.5) недостатньо — точний
+ *     пріоритет дій (зменшити фото → прибрати фото → ручне втручання)
+ *     потребує підтвердження у верстальниці (див.
  *     docs/architecture.md, "Відкриті питання").
+ *   - Духовність досі без мапи paragraph_style_roles, тому групування
+ *     статей і все з нього залежне (relink фото, вставка тексту,
+ *     fitFrameText) там взагалі не застосовується.
  *
  * Вхід: шлях до layout_plan.json (записаного `inkforge-plan`) і шлях до
  * файла-основи (.indd попереднього випуску цієї газети).
@@ -356,6 +368,41 @@ function setFrameText(item, text) {
 }
 
 /**
+ * Якщо вставлений текст не поміщається у фрейм (overset), пробує "підтиснути"
+ * його через Horizontal Scale, крок за кроком зменшуючи від 100% до
+ * "minScale" (нижня межа з layout_plan.json, за замовчуванням 97% --
+ * див. docs/architecture.md, "Рівень 2"), як робить верстальниця вручну.
+ * Це єдиний автоматичний спосіб боротьби з overset -- зменшення/прибирання
+ * фото НЕ автоматизовано (потребує підтвердження пріоритету дій у
+ * верстальниці, див. "Відкриті питання"). Верхня межа (max_horizontal_scale,
+ * за замовчуванням 102%) зарезервована на майбутнє для протилежної задачі
+ * (розтягнути закороткий текст) -- тут не використовується. Повертає true,
+ * якщо текст вміщається (одразу або після підтискання); false, якщо лишився
+ * overset навіть на мінімальному масштабі -- потребує ручного втручання.
+ */
+function fitFrameText(item, minScale) {
+    try {
+        if (!item.overflows) {
+            return true;
+        }
+    } catch (e) {
+        return true; // немає способу перевірити overset -- не гадаємо, лишаємо як є
+    }
+
+    var scale = 100;
+    while (item.overflows && scale > minScale) {
+        scale -= 1;
+        try {
+            item.texts[0].horizontalScale = scale;
+        } catch (e2) {
+            break;
+        }
+    }
+
+    return !item.overflows;
+}
+
+/**
  * Групує сторінку за геометрією, (для фото) переприв'язує посилання на
  * нові файли зі layout_plan.json і вставляє текст заголовка/ліда/тіла
  * статті у відповідні за роллю фрейми (headline / lead_intro / body).
@@ -420,12 +467,17 @@ function applyArticlesToPage(page, pagePlan, plan) {
 
         var leadMember = findMemberByRole(cluster, "lead_intro");
         var bodyMember = findMemberByRole(cluster, "body");
+        var minScale = plan.min_horizontal_scale || 97;
 
         var inserted = [];
         var skipped = [];
+        var overset = [];
 
         if (setFrameText(cluster.headline.item, article.title)) {
             inserted.push("заголовок");
+            if (!fitFrameText(cluster.headline.item, minScale)) {
+                overset.push("заголовок");
+            }
         } else {
             skipped.push("заголовок");
         }
@@ -433,6 +485,9 @@ function applyArticlesToPage(page, pagePlan, plan) {
         if (leadMember) {
             if (setFrameText(leadMember.item, article.lead)) {
                 inserted.push("лід");
+                if (!fitFrameText(leadMember.item, minScale)) {
+                    overset.push("лід");
+                }
             } else {
                 skipped.push("лід");
             }
@@ -441,6 +496,9 @@ function applyArticlesToPage(page, pagePlan, plan) {
         if (bodyMember) {
             if (setFrameText(bodyMember.item, article.body)) {
                 inserted.push("тіло");
+                if (!fitFrameText(bodyMember.item, minScale)) {
+                    overset.push("тіло");
+                }
             } else {
                 skipped.push("тіло");
             }
@@ -451,6 +509,14 @@ function applyArticlesToPage(page, pagePlan, plan) {
             (inserted.length > 0 ? inserted.join(", ") : "нічого") + "); пропущено без змін (" +
             (skipped.length > 0 ? skipped.join(", ") : "нічого") + ")."
         );
+
+        if (overset.length > 0) {
+            $.writeln(
+                "[Рівень 2] Сторінка " + pagePlan.page + ", стаття '" + article.slug +
+                "': УВАГА -- текст не поміщається навіть при Horizontal Scale " + minScale +
+                "% (" + overset.join(", ") + ") -- потрібне ручне втручання верстальниці."
+            );
+        }
     }
 }
 
@@ -479,8 +545,9 @@ function main() {
 
     $.writeln(
         "Готово (частково): preflight шрифтів, колонтитул, геометричне групування статей, " +
-        "relink фото та вставка тексту заголовка/ліда/тіла виконано для газет із розв'язаною " +
-        "мапою ролей (paragraph_style_roles); перевірка на реальному InDesign ще потрібна."
+        "relink фото, вставка тексту заголовка/ліда/тіла та підтискання overset-тексту " +
+        "(Horizontal Scale) виконано для газет із розв'язаною мапою ролей " +
+        "(paragraph_style_roles); перевірка на реальному InDesign ще потрібна."
     );
 }
 
