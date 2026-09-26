@@ -520,6 +520,205 @@ function applyHeadlineFontAlternation(item, plan, articleIndex, pageNumber, slug
 }
 
 /**
+ * Лінійний пошук елемента сторінки за точним числовим "id" (scripting
+ * property порядкового номера елемента, не Self ID з IDML-файлу напряму --
+ * hex-рядок з profiles/mif.yaml.page1_layout переводиться в число викликом
+ * коду, що використовує цю функцію, через parseInt(hexId, 16)).
+ *
+ * Свідомо НЕ використовує itemByID() -- семантика цього методу (чи він
+ * шукає по всьому документу, чи лише в межах сторінки/розвороту виклику, і
+ * як реагує на відсутній ID) не перевірена (немає InDesign у середовищі
+ * розробки цього проєкту), тож обрано консервативніший, самоочевидний
+ * підхід: пройтися по колекціях сторінки й порівняти .id напряму.
+ */
+function findByExactId(page, numericId) {
+    var collections = [
+        page.textFrames.everyItem().getElements(),
+        page.rectangles.everyItem().getElements(),
+        page.polygons.everyItem().getElements(),
+        page.ovals.everyItem().getElements()
+    ];
+    for (var c = 0; c < collections.length; c++) {
+        var collection = collections[c];
+        for (var i = 0; i < collection.length; i++) {
+            if (collection[i].id === numericId) {
+                return collection[i];
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * Знаходить першу статтю з заданою роллю (role, напр. "main" чи
+ * "storm_forecast" -- див. planner._plan_page1_special) серед статей
+ * сторінки, або null.
+ */
+function findArticleByRole(articles, role) {
+    for (var i = 0; i < articles.length; i++) {
+        if (articles[i].role === role) {
+            return articles[i];
+        }
+    }
+    return null;
+}
+
+/**
+ * Переприв'язує головне фото сторінки 1 (фіксований frame ID з
+ * page1_layout.main_photo_frame_id) на зображення головної статті.
+ * Захисний принцип, як і в applyArticlesToPage: будь-яка невдача (не
+ * знайдено фрейм, немає image_path, помилка relink) лише пишеться у
+ * $.writeln і пропускається без здогадок.
+ */
+function applyPage1PhotoSlot(page, hexId, article, pageNumber) {
+    var numericId = parseInt(hexId, 16);
+    if (isNaN(numericId)) {
+        $.writeln(
+            "[Рівень 2, стор." + pageNumber + "] page1_layout: некоректний ID '" + hexId +
+            "' для головного фото -- пропущено."
+        );
+        return;
+    }
+    var frame = findByExactId(page, numericId);
+    if (!frame) {
+        $.writeln(
+            "[Рівень 2, стор." + pageNumber + "] page1_layout: фрейм з id " + hexId +
+            " (головне фото) не знайдено на сторінці -- пропущено."
+        );
+        return;
+    }
+    if (!article.image_path) {
+        $.writeln(
+            "[Рівень 2, стор." + pageNumber + "] page1_layout: для головної статті '" +
+            article.slug + "' немає image_path -- фото не переприв'язано."
+        );
+        return;
+    }
+    try {
+        frame.allGraphics[0].itemLink.relink(new File(article.image_path));
+        $.writeln(
+            "[Рівень 2, стор." + pageNumber + "] page1_layout: головне фото переприв'язано на " +
+            article.image_path + "."
+        );
+    } catch (e) {
+        $.writeln(
+            "[Рівень 2, стор." + pageNumber + "] page1_layout: НЕ вдалося переприв'язати головне " +
+            "фото (" + e + ")."
+        );
+    }
+}
+
+/**
+ * Вставляє текст у фіксований (за hex ID з page1_layout) фрейм сторінки 1
+ * і намагається підтиснути overset так само, як applyArticlesToPage.
+ */
+function applyPage1TextSlot(page, hexId, text, minScale, pageNumber, label) {
+    var numericId = parseInt(hexId, 16);
+    if (isNaN(numericId)) {
+        $.writeln(
+            "[Рівень 2, стор." + pageNumber + "] page1_layout: некоректний ID '" + hexId +
+            "' для " + label + " -- пропущено."
+        );
+        return;
+    }
+    var frame = findByExactId(page, numericId);
+    if (!frame) {
+        $.writeln(
+            "[Рівень 2, стор." + pageNumber + "] page1_layout: фрейм з id " + hexId + " (" + label +
+            ") не знайдено на сторінці -- пропущено."
+        );
+        return;
+    }
+    if (setFrameText(frame, text)) {
+        if (!fitFrameText(frame, minScale)) {
+            $.writeln(
+                "[Рівень 2, стор." + pageNumber + "] page1_layout: " + label + " не поміщається " +
+                "навіть при Horizontal Scale " + minScale + "% -- потрібне ручне втручання " +
+                "верстальниці."
+            );
+        }
+    } else {
+        $.writeln(
+            "[Рівень 2, стор." + pageNumber + "] page1_layout: " + label + " -- немає тексту для " +
+            "вставки (пропущено без змін)."
+        );
+    }
+}
+
+/**
+ * Спеціальна обробка сторінки 1 МІФ (status="planned_page1_special" у
+ * layout_plan.json). На відміну від findArticleClusters/applyArticlesToPage
+ * (геометричне кластерування для сторінок 2-7 і Диховності), тут
+ * підставляються фіксовані IDML Self ID з profiles/mif.yaml.page1_layout,
+ * знайдені й перевірені на стабільність по 3 зразках issue07/08/09 --
+ * сторінка 1 має ~38 текстових фреймів (шапка, штрих-код, тизери інших
+ * сторінок тощо), для яких геометричне кластерування не підходить (його
+ * захисний принцип "кількість кластерів != кількість статей -- пропустити
+ * всю сторінку" майже напевно спрацював би хибно на такій кількості
+ * непов'язаних елементів).
+ *
+ * Правила (підтверджені верстальницею, див. profiles/mif.yaml):
+ *   - роль "main" (найдовша стаття, окрім прогнозу магнітних бур) --
+ *     велике фото зліва + заголовок + тіло у фіксовані фрейми.
+ *   - роль "storm_forecast" (стаття з ключовим словом
+ *     storm_forecast_keyword) -- один фрейм, що вже має кольоровий фон у
+ *     шаблоні (перевірено на зразках) -- скрипт лише вставляє заголовок і
+ *     тіло одним блоком, колір не чіпає.
+ * "Народні прикмети" СВІДОМО не автоматизовано (жодного разу не було
+ * фактично розміщено на сторінці в 3 зразках -- див. profiles/mif.yaml) --
+ * лишається ручною вставкою верстальниці.
+ */
+function applyMifPage1Special(page, pagePlan, plan) {
+    var layout = plan.page1_layout;
+    if (!layout) {
+        $.writeln(
+            "[Рівень 2, стор." + pagePlan.page + "] page1_layout відсутній у плані -- пропущено."
+        );
+        return;
+    }
+    var minScale = plan.min_horizontal_scale || 97;
+
+    var mainArticle = findArticleByRole(pagePlan.articles, "main");
+    if (mainArticle) {
+        applyPage1PhotoSlot(page, layout.main_photo_frame_id, mainArticle, pagePlan.page);
+        applyPage1TextSlot(
+            page, layout.main_headline_frame_id, mainArticle.title, minScale, pagePlan.page,
+            "заголовок головної статті"
+        );
+        applyPage1TextSlot(
+            page, layout.main_body_frame_id, mainArticle.body, minScale, pagePlan.page,
+            "тіло головної статті"
+        );
+    } else {
+        $.writeln(
+            "[Рівень 2, стор." + pagePlan.page + "] page1_layout: роль 'main' не призначено жодній " +
+            "статті -- фото/заголовок/тіло головної статті не змінено."
+        );
+    }
+
+    var stormArticle = findArticleByRole(pagePlan.articles, "storm_forecast");
+    if (stormArticle) {
+        var stormText = stormArticle.title
+            ? stormArticle.title + "\n" + stormArticle.body
+            : stormArticle.body;
+        applyPage1TextSlot(
+            page, layout.storm_forecast_frame_id, stormText, minScale, pagePlan.page,
+            "прогноз магнітних бур"
+        );
+    } else {
+        $.writeln(
+            "[Рівень 2, стор." + pagePlan.page + "] page1_layout: роль 'storm_forecast' не " +
+            "призначено жодній статті -- прогноз магнітних бур не змінено."
+        );
+    }
+
+    $.writeln(
+        "[Рівень 2, стор." + pagePlan.page + "] page1_layout: спеціальна обробка сторінки 1 " +
+        "завершена (\"Народні прикмети\" свідомо не автоматизовано)."
+    );
+}
+
+/**
  * Групує сторінку за геометрією, (для фото) переприв'язує посилання на
  * нові файли зі layout_plan.json і вставляє текст заголовка/ліда/тіла
  * статті у відповідні за роллю фрейми (headline / lead_intro / body).
@@ -666,11 +865,15 @@ function main() {
 
     for (var i = 0; i < plan.pages.length; i++) {
         var pagePlan = plan.pages[i];
-        if (pagePlan.status !== "planned") {
+        if (pagePlan.status !== "planned" && pagePlan.status !== "planned_page1_special") {
             continue; // ручні/спеціальні/поза межами/порожні сторінки не чіпаємо
         }
         var page = doc.pages.item(pagePlan.page - 1);
-        applyArticlesToPage(page, pagePlan, plan);
+        if (pagePlan.status === "planned_page1_special") {
+            applyMifPage1Special(page, pagePlan, plan);
+        } else {
+            applyArticlesToPage(page, pagePlan, plan);
+        }
     }
 
     $.writeln(

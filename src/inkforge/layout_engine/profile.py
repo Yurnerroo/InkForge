@@ -42,6 +42,29 @@ class PhotoLinks:
 
 
 @dataclass
+class Page1Layout:
+    """Fixed IDML frame IDs for a newspaper's hand-designed page 1.
+
+    Populated only for newspapers where page-1 automation was explicitly
+    confirmed by the layout artist (currently MIF only -- see
+    docs/architecture.md, "Відкриті питання"). The IDs are the IDML
+    ``Self`` attribute values (hex, without the leading ``u``) of specific
+    frames, found by inspecting 3 sample IDML files where they were stable.
+    The ExtendScript executor resolves them via each frame's numeric ``id``
+    scripting property (``parseInt(id, 16)``). MIF's overall
+    ``frame_stability`` is only "partial" -- if a lookup ever fails on a
+    real issue, the executor must skip that step with a warning rather than
+    guess at a replacement frame.
+    """
+
+    main_photo_frame_id: str
+    main_headline_frame_id: str
+    main_body_frame_id: str
+    storm_forecast_frame_id: str
+    storm_forecast_keyword: str
+
+
+@dataclass
 class NewspaperProfile:
     """Everything Level 2 needs to know about one newspaper template."""
 
@@ -64,6 +87,7 @@ class NewspaperProfile:
     frame_stability: str
     samples_analyzed: list[str]
     notes: str
+    page1_layout: Page1Layout | None = None
 
     def color_mode_for_page(self, page: int) -> str | None:
         """Return the spread's color mode for ``page``, or None if unknown."""
@@ -180,6 +204,20 @@ def _profile_from_dict(raw: dict[str, Any]) -> NewspaperProfile:
     except (KeyError, TypeError) as exc:
         raise ProfileError(f"Некоректне поле special_pages: {raw.get('special_pages')!r}") from exc
 
+    page1_layout_raw = raw.get("page1_layout")
+    page1_layout = None
+    if page1_layout_raw is not None:
+        try:
+            page1_layout = Page1Layout(
+                main_photo_frame_id=page1_layout_raw["main_photo_frame_id"],
+                main_headline_frame_id=page1_layout_raw["main_headline_frame_id"],
+                main_body_frame_id=page1_layout_raw["main_body_frame_id"],
+                storm_forecast_frame_id=page1_layout_raw["storm_forecast_frame_id"],
+                storm_forecast_keyword=page1_layout_raw["storm_forecast_keyword"],
+            )
+        except (KeyError, TypeError) as exc:
+            raise ProfileError(f"Некоректне поле page1_layout: {page1_layout_raw!r}") from exc
+
     return NewspaperProfile(
         id=raw["id"],
         display_name=raw["display_name"],
@@ -200,4 +238,5 @@ def _profile_from_dict(raw: dict[str, Any]) -> NewspaperProfile:
         frame_stability=raw["frame_stability"],
         samples_analyzed=list(raw["samples_analyzed"]),
         notes=raw["notes"],
+        page1_layout=page1_layout,
     )

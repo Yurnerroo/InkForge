@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from inkforge.layout_engine.profile import (
+    Page1Layout,
     ProfileError,
     load_profile,
     load_profile_by_id,
@@ -155,3 +156,71 @@ def test_other_profiles_default_headline_font_alternation_to_none(newspaper_id: 
     profile = load_profile_by_id(newspaper_id, PROFILES_DIR)
 
     assert profile.headline_font_alternation is None
+
+
+def test_load_profile_without_page1_layout_defaults_to_none(tmp_path: Path) -> None:
+    profile_path = tmp_path / "test_gazeta.yaml"
+    profile_path.write_text(MINIMAL_YAML, encoding="utf-8")
+
+    profile = load_profile(profile_path)
+
+    assert profile.page1_layout is None
+
+
+def test_load_profile_parses_page1_layout(tmp_path: Path) -> None:
+    profile_path = tmp_path / "test_gazeta.yaml"
+    profile_path.write_text(
+        MINIMAL_YAML
+        + """
+page1_layout:
+  main_photo_frame_id: "351cb"
+  main_headline_frame_id: "35223"
+  main_body_frame_id: "39190"
+  storm_forecast_frame_id: "40ba4"
+  storm_forecast_keyword: "магнітн"
+""",
+        encoding="utf-8",
+    )
+
+    profile = load_profile(profile_path)
+
+    assert profile.page1_layout == Page1Layout(
+        main_photo_frame_id="351cb",
+        main_headline_frame_id="35223",
+        main_body_frame_id="39190",
+        storm_forecast_frame_id="40ba4",
+        storm_forecast_keyword="магнітн",
+    )
+
+
+def test_load_profile_incomplete_page1_layout_raises(tmp_path: Path) -> None:
+    profile_path = tmp_path / "test_gazeta.yaml"
+    profile_path.write_text(
+        MINIMAL_YAML
+        + """
+page1_layout:
+  main_photo_frame_id: "351cb"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProfileError, match="page1_layout"):
+        load_profile(profile_path)
+
+
+def test_mif_profile_carries_confirmed_page1_layout() -> None:
+    """MIF is the only newspaper with a confirmed page1_layout so far (see
+    profiles/mif.yaml notes on Rule A/B)."""
+
+    profile = load_profile_by_id("mif", PROFILES_DIR)
+
+    assert profile.page1_layout is not None
+    assert profile.page1_layout.storm_forecast_keyword == "магнітн"
+    assert 1 not in profile.manual_pages
+
+
+@pytest.mark.parametrize("newspaper_id", ["ty_i_ya", "dyhovnist"])
+def test_other_profiles_default_page1_layout_to_none(newspaper_id: str) -> None:
+    profile = load_profile_by_id(newspaper_id, PROFILES_DIR)
+
+    assert profile.page1_layout is None
