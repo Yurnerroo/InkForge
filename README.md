@@ -9,12 +9,15 @@ by hand afterwards.
 
 > **Status:** Level 1 (Content Checker) is done and tested. Level 2 (layout
 > planning) has a complete, tested Python side (`inkforge-plan`); the InDesign
-> ExtendScript executor now handles geometric article-frame clustering and
-> photo relink for one newspaper (MIF), but is still not verified against a
-> real InDesign installation (see
+> ExtendScript executor handles geometric article-frame clustering, photo
+> relink, headline-font alternation, and a page-specific special case (MIF
+> page 1: main-article + storm-forecast slot) for the newspapers analyzed so
+> far, but is still not verified against a real InDesign installation (see
 > [extendscript/README.md](extendscript/README.md)). Level 3 (One-Click
-> Launcher, FastAPI) has a working, tested scaffold; its InDesign-COM step is
-> also unverified in a real environment.
+> Launcher, FastAPI) now covers the full pipeline — check, plan, lay out in
+> InDesign, and export a print-ready `PDF/X-1a` — as four independently
+> confirmable steps; the two InDesign-COM steps are also unverified in a real
+> environment.
 
 ## The problem
 
@@ -25,7 +28,7 @@ fixed preset. This is repetitive but not simple to automate blindly — every
 newspaper template has its own page structure, color rules, paragraph styles
 and exceptions, and none of that was documented anywhere going in. InkForge
 turns that tribal knowledge into versioned, testable configuration and code,
-one validated step at a time, for **4+ different newspaper templates**.
+one validated step at a time, for **3 different newspaper templates**.
 
 ## Engineering highlights
 
@@ -47,9 +50,9 @@ one validated step at a time, for **4+ different newspaper templates**.
   independently reviewed pull request with its own commits and tests —
   architecture and requirements docs are updated alongside the code, not
   after the fact.
-- **66 passing unit tests** (`pytest`) covering content parsing, layout
+- **105 passing unit tests** (`pytest`) covering content parsing, layout
   planning, JSON plan serialization, and the Level 3 API (with a real,
-  environment-honest test asserting the COM step fails gracefully when
+  environment-honest test asserting the COM steps fail gracefully when
   InDesign isn't available, rather than mocking it away).
 
 ## Architecture — 4 levels of automation
@@ -58,8 +61,8 @@ one validated step at a time, for **4+ different newspaper templates**.
 |---|---|---|
 | 0 | Fully manual baseline (today, before this project) | n/a |
 | 1 | **Content Checker** — scans a weekly issue folder, matches text+photo files, computes word counts and photo metadata (size/DPI/color mode), reports problems, writes `manifest.json` | ✅ Done |
-| 2 | **Auto-Layout** — Python planner turns `manifest.json` + a newspaper profile into `layout_plan.json`; an InDesign ExtendScript executor applies it (font preflight, running headers, geometric article-frame clustering, photo relink) | 🚧 In progress |
-| 3 | **One-Click Launcher** — local FastAPI web app driving Levels 1-2, plus (Windows-only) COM automation to run the InDesign executor without switching windows | 🚧 In progress |
+| 2 | **Auto-Layout** — Python planner turns `manifest.json` + a newspaper profile into `layout_plan.json`; an InDesign ExtendScript executor applies it (font preflight, running headers, geometric article-frame clustering, photo relink, headline-font alternation, and a page-specific special case for one newspaper's front page) | 🚧 In progress — all 3 profiled newspapers covered, real-InDesign verification pending |
+| 3 | **One-Click Launcher** — local FastAPI web app driving Levels 1-2, plus (Windows-only) COM automation to run the InDesign executor and export a print-ready `PDF/X-1a`, without switching windows | 🚧 In progress — full pipeline wired, real-InDesign verification pending |
 | 4 | Optional future extras: auto photo cropping, headline auto-balancing, batch layout for multiple newspapers, issue history/versioning | 💡 Future idea |
 
 See [docs/architecture.md](docs/architecture.md) for the full breakdown,
@@ -103,6 +106,8 @@ inkforge-plan path/to/2026-W40_newspaper-x/manifest.json --profile some_profile_
 # Level 3: local one-click launcher (adds fastapi/uvicorn/pywin32)
 pip install -e ".[launcher]"
 inkforge-launcher
+# -> opens a local page with 4 confirmable steps: check content, build the
+#    layout plan, lay out in InDesign (COM), export a print-ready PDF (COM)
 
 # run the test suite
 pytest
