@@ -57,6 +57,7 @@ class LayoutPlan:
     cmyk_profile: str | None = None
     fonts_installed: list[str] = field(default_factory=list)
     fonts_substituted: list[str] = field(default_factory=list)
+    paragraph_style_roles: dict[str, str] | str | None = None
     pages: list[PagePlan] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -71,6 +72,7 @@ def build_layout_plan(manifest: dict[str, Any], profile: NewspaperProfile) -> La
         cmyk_profile=profile.cmyk_profile,
         fonts_installed=list(profile.fonts_installed),
         fonts_substituted=list(profile.fonts_substituted),
+        paragraph_style_roles=profile.paragraph_style_roles,
     )
 
     seen_pages: set[int] = set()
