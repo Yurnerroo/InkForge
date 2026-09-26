@@ -28,6 +28,9 @@ class ArticleContent:
     text_path: Path | None = None
     image_path: Path | None = None
     image_info: ImageInfo | None = None
+    title: str = ""
+    lead: str = ""
+    body: str = ""
     word_count: int = 0
     char_count: int = 0
     has_lead_paragraph: bool = False
