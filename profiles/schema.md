@@ -26,6 +26,7 @@
 | `photo_links.naming_pattern` | string | Патерн імені файлу посилання у старому пакеті (лише для довідки — Рівень 2 підставляє свій файл, не парсить старе ім'я). |
 | `paragraph_styles_found` | list[string] | Усі назви стилів абзаців, знайдені в зразках (сирий список). |
 | `paragraph_style_roles` | object \| "TBD" | Мапа роль → назва(и) стилю, якщо підтверджено верстальницею; інакше рядок `"TBD"`. |
+| `character_size_roles` | object \| "TBD" \| null | Опційне. Заповнюється лише коли `paragraph_style_roles` не працює (немає надійних іменованих стилів абзаців — див. `dyhovnist.yaml`) і роль визначається прямим розміром символу (`PointSize`) замість назви стилю. `null`, якщо метод не потрібен (є надійна мапа за стилем). |
 | `special_pages` | list[object] | Сторінки з нестандартною структурою (напр. ТВ-програма): `{pages: [...], description: ..., automation: none}`. |
 | `fonts_installed` | list[string] | Шрифти зі статусом `Installed` у зразках. |
 | `fonts_substituted` | list[string] | Шрифти зі статусом `Substituted` у зразках — ризик підміни, перевірити перед запуском. |
