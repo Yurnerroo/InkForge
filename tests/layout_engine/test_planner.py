@@ -139,7 +139,11 @@ def test_missing_automatable_page_produces_warning() -> None:
 
 
 def test_plan_carries_profile_metadata_for_the_extendscript_executor() -> None:
-    profile = _make_profile(cmyk_profile="ISOnewspaper26v4", fonts_substituted=["EB Garamond"])
+    profile = _make_profile(
+        cmyk_profile="ISOnewspaper26v4",
+        fonts_substituted=["EB Garamond"],
+        paragraph_style_roles={"headline": ["ZAG"], "body": ["Text"]},
+    )
     manifest = _manifest([])
 
     plan = build_layout_plan(manifest, profile)
@@ -148,6 +152,16 @@ def test_plan_carries_profile_metadata_for_the_extendscript_executor() -> None:
     assert plan.display_name == "Test Gazeta"
     assert plan.cmyk_profile == "ISOnewspaper26v4"
     assert plan.fonts_substituted == ["EB Garamond"]
+    assert plan.paragraph_style_roles == {"headline": ["ZAG"], "body": ["Text"]}
+
+
+def test_plan_carries_tbd_paragraph_style_roles_as_is() -> None:
+    profile = _make_profile(paragraph_style_roles="TBD")
+    manifest = _manifest([])
+
+    plan = build_layout_plan(manifest, profile)
+
+    assert plan.paragraph_style_roles == "TBD"
 
 
 def test_pages_are_sorted_by_page_number() -> None:

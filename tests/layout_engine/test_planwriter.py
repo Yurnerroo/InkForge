@@ -54,3 +54,4 @@ def test_write_layout_plan_produces_valid_json(tmp_path: Path) -> None:
     assert "generated_at" in data
     assert data["pages"][0]["page"] == 2
     assert data["pages"][0]["articles"][0]["article_id"] == "2_1_a"
+    assert data["paragraph_style_roles"] == {"body": ["Body"]}
