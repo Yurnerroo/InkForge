@@ -1,0 +1,81 @@
+id: dyhovnist
+display_name: "Духовність"
+page_count: 9
+manual_pages: [1]
+manual_pages_uncertain: [9]
+
+spreads:
+  - pages: [2, 3]
+    color_mode: grayscale
+  - pages: [4, 5]
+    color_mode: mixed
+  - pages: [6, 7]
+    color_mode: grayscale
+  - pages: [8, 9]
+    color_mode: mixed
+
+color_alternation_pattern: >
+  Не чергування через розворот, а фіксована позиція: розвороти 2-3 і 6-7
+  завжди повністю ч/б; розвороти 4-5 і 8-9 переважно CMYK з одним ч/б
+  винятком на кожному (імовірно портрет/значок). Розворот-обкладинка (стор.
+  1) — мішаний. Патерн ідентичний на всіх 3 проаналізованих номерах (issue
+  8, 9, 10) -> свідомий дизайн, не випадковість.
+
+cmyk_profile: null
+
+photo_links:
+  storage: linked
+  naming_pattern: "Links/{page}[_{n}].{ext}"
+
+paragraph_styles_found:
+  - Стандарт
+  - Text_Zagalnuj
+  - Zagolovok_Maluj
+  - "Zagolovok++"
+  - zagol_18
+
+paragraph_style_roles: "TBD"
+
+special_pages: []
+
+fonts_installed:
+  - Arial
+  - Cambria
+  - Cooper
+  - FavoritExtraBoldC
+  - "Franklin Gothic Demi Cond"
+  - FreeSetC
+  - FreeSetDemiC
+  - "Wingdings 2"
+
+fonts_substituted:
+  - "Minion Pro"
+  - "Myriad Pro"
+  - "Kozuka Mincho Pro"
+  - FranklinGothicHeavyC
+  - FreeSetBoldC
+  - AGFriquerC
+  - EuropeC
+  - FavoritHeavyC
+  - BookmanC
+  - BannikovaC
+  - Pragmatica
+
+frame_stability: partial
+
+samples_analyzed:
+  - "Dyhovnist_8(169)"
+  - "Dyhovnist_9(170)"
+  - "Dyhovnist_10(171)"
+
+notes: >
+  Непарна загальна кількість сторінок (9) — на відміну від "Ти і Я" (16) і
+  МІФ (8), де перша й остання сторінки завжди одинарні розвороти. Тут
+  одинарна лише стор. 1; стор. 9 входить у парний розворот 8-9 разом з
+  автоматизованою стор. 8 -> статус стор. 9 (повністю ручна чи частково
+  автоматизована) не підтверджено, позначено в manual_pages_uncertain.
+  "Text_Zagalnuj", "Стандарт", "zagol_18" збігаються з МІФ — той самий
+  патерн часткового перевикористання базових стилів між шаблонами
+  верстальниці. Багато кириличних декоративних шрифтів (*C-суфікс) у
+  статусі Substituted навіть на машині, де готувався зразок -> високий
+  ризик підміни шрифту для цієї газети конкретно.

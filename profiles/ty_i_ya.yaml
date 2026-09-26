@@ -1,0 +1,83 @@
+id: ty_i_ya
+display_name: "Ти і Я"
+page_count: 16
+manual_pages: [1, 16]
+manual_pages_uncertain: []
+
+spreads:
+  - pages: [2, 3]
+    color_mode: grayscale
+  - pages: [4, 5]
+    color_mode: cmyk
+  - pages: [6, 7]
+    color_mode: grayscale
+  - pages: [8, 9]
+    color_mode: cmyk
+  - pages: [10, 11]
+    color_mode: grayscale
+  - pages: [12, 13]
+    color_mode: cmyk
+  - pages: [14, 15]
+    color_mode: grayscale
+
+color_alternation_pattern: >
+  Чітке чергування через розворот, починаючи з чорно-білого на першому
+  внутрішньому розвороті (2-3). Підтверджено побайтово на 3 послідовних
+  номерах (issue 9, 10, 11).
+
+cmyk_profile: ISOnewspaper26v4
+
+photo_links:
+  storage: linked
+  naming_pattern: "Links/{page}[_{n}].{ext}"
+
+paragraph_styles_found:
+  - TextOsnovn
+  - Zaolov
+  - zag_1
+  - ZagSmall
+  - Zag_small1
+  - Pidzag
+  - Vrizka
+  - vrizka
+  - Rubryka
+  - Kanal
+  - Programa
+  - Storinka
+
+paragraph_style_roles:
+  body: [TextOsnovn]
+  headline: [Zaolov, zag_1, ZagSmall, Zag_small1]
+  subheadline: [Pidzag]
+  lead_in: [Vrizka, vrizka]
+  category_tag: [Rubryka]
+  page_number: [Storinka]
+
+special_pages:
+  - pages: [10, 11]
+    description: >
+      ТВ-програма — суцільний ручний текстовий потік (стилі Kanal і Programa),
+      немає структури стаття+фото.
+    automation: none
+
+fonts_installed:
+  - Comfortaa
+  - FreeSetDemiC
+
+fonts_substituted:
+  - "EB Garamond"
+  - Jura
+  - "Neo Sans Pro"
+  - "Blogger Sans"
+
+frame_stability: partial
+
+samples_analyzed:
+  - "Ty i Ja_9(918)"
+  - "Ty i Ja_10(919)"
+  - "Ty i Ja_11(920)"
+
+notes: >
+  zag_1 має характерний колір заливки CMYK C=100 M=90 Y=10 K=0. У
+  CharacterStyle є автозгенеровані "Стиль символа 1/2" — слід імпорту з
+  Microsoft Word (Word -> копіювання в InDesign).

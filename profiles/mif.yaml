@@ -1,0 +1,83 @@
+id: mif
+display_name: "МІФ"
+page_count: 8
+manual_pages: [1, 8]
+manual_pages_uncertain: []
+
+spreads:
+  - pages: [2, 3]
+    color_mode: grayscale
+  - pages: [4, 5]
+    color_mode: grayscale
+  - pages: [6, 7]
+    color_mode: grayscale
+
+color_alternation_pattern: >
+  Чергування відсутнє — усі фото у всіх 3 проаналізованих номерах (issue 7,
+  8, 9) у режимі Grayscale. Схоже, ця газета повністю чорно-біла, кольорових
+  розворотів немає взагалі.
+
+cmyk_profile: null
+
+photo_links:
+  storage: linked
+  naming_pattern: "Links/{page}[_{n}].{ext}"
+
+paragraph_styles_found:
+  - "текст"
+  - Стандарт
+  - Text_Zagalnuj
+  - vrubka
+  - zag_smol
+  - "text"
+  - "Стиль абзаца 1"
+  - zagol_18
+  - probel
+  - Text
+  - ZAG
+  - Zag_small
+  - Vriz
+  - Pidzag
+  - TextOsnovn
+
+paragraph_style_roles: "TBD"
+
+special_pages: []
+
+fonts_installed:
+  - Arial
+  - Cambria
+  - "Comic Sans MS"
+  - Everest-Demi
+  - FreeSetC
+  - "Times New Roman"
+  - Wingdings
+
+fonts_substituted:
+  - "Minion Pro"
+  - "Myriad Pro"
+  - "Kozuka Mincho Pro"
+  - "Times New Roman Cyr"
+  - UkrainianXeniaExtended
+  - Univers
+  - UkrainianTimesET
+  - "Blogger Sans"
+
+frame_stability: partial
+
+samples_analyzed:
+  - "MIF_7(122)"
+  - "MIF_8(123)"
+  - "MIF_9(124)"
+
+notes: >
+  Кілька назв стилів абзаців ("Pidzag", "TextOsnovn", "Vriz") збігаються з
+  "Ти і Я" — ймовірно, верстальниця історично копіювала базові стилі між
+  своїми шаблонами. Не покладатися на це як на гарантію: газета все одно має
+  й власні унікальні стилі ("текст", "vrubka", "zag_smol", "ZAG"). Роль
+  кожного стилю (основний текст / заголовок / підзаголовок) не підтверджена
+  верстальницею — позначено як TBD, щоб не вгадувати неправильно. Minion
+  Pro/Myriad Pro/Kozuka Mincho Pro — типові дефолтні шрифти Adobe, присутні
+  майже в кожному InDesign-документі; ймовірно не використовуються реально
+  в дизайні (потребує підтвердження), решта substituted-шрифтів — реальний
+  ризик.
