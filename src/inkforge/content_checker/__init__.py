@@ -7,5 +7,6 @@ script, Level 2) consume.
 """
 
 from .models import ArticleContent, IssueContent, PageContent
+from .scanner import scan_issue
 
-__all__ = ["ArticleContent", "IssueContent", "PageContent"]
+__all__ = ["ArticleContent", "IssueContent", "PageContent", "scan_issue"]
