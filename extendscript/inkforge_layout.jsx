@@ -2,24 +2,35 @@
  * InkForge — Рівень 2, виконавець ExtendScript (Adobe InDesign).
  *
  * СТАТУС: частковий, НЕ перевірений на реальному InDesign (у середовищі
- * розробки немає встановленого InDesign). Реалізовано лише те, що не
- * залежить від ще невідомої мапи "Self ID фрейма -> роль статті" для кожної
- * газети (див. розділ "Відкриті питання" у docs/architecture.md):
+ * розробки немає встановленого InDesign). Реалізовано:
  *
  *   1. Preflight шрифтів — звірка layout_plan.json (fonts_installed /
  *      fonts_substituted, взяті з профілю газети) з реальним статусом
  *      шрифтів на цій машині через app.fonts.
  *   2. Простановка змінних колонтитула (дата випуску, номер) через
  *      Text Variables документа.
+ *   3. Геометричне групування кількох статей на одному розвороті
+ *      (findArticleClusters) + relink фото за знайденими кластерами
+ *      (applyArticlesToPage) — ЛИШЕ для газет із розв'язаною мапою
+ *      paragraph_style_roles (наразі тільки MIF; див.
+ *      docs/architecture.md, "Групування кількох статей..."). Алгоритм
+ *      перевірено на офлайн-аналізі IDML (samples/article_clusters.py,
+ *      не в git), але НЕ на реальному InDesign — тому діє захисний
+ *      принцип "не вгадувати": якщо кількість знайдених кластерів не
+ *      збігається з кількістю запланованих статей, сторінка пропускається
+ *      без жодних змін.
  *
  * ЩЕ НЕ РЕАЛІЗОВАНО (навмисно, не забуто):
- *   - Розчищення старого вмісту фреймів і заповнення новими статтями/фото
- *     за layout_plan.json (relink фото, застосування Horizontal Scale
- *     97-102%). Це вимагає стабільної мапи "який фрейм на сторінці
- *     відповідає якій ролі статті", якої в profiles/*.yaml ще немає —
- *     потрібен окремий прохід аналізу IDML (Self ID кожного фрейма на
- *     кожному розвороті) перш ніж тут можна писати реальний relink.
- *     applyArticlesToPage() нижче — навмисна заглушка з поясненням у коді.
+ *   - Вставка реального тексту заголовка/ліда/тіла статті у знайдені
+ *     фрейми. Рівень 1 (content_checker) наразі рахує лише метрики
+ *     (word_count/char_count/has_lead_paragraph), а не структурований
+ *     поділ вихідного .docx на заголовок/лід/тіло — без цього вставляти
+ *     нема що. Relink фото не залежить від цієї проблеми і тому вже
+ *     реалізовано.
+ *   - Динамічне додавання/видалення фреймів під новий обсяг тексту
+ *     (Horizontal Scale 97-102% тощо) — Духовність досі без мапи ролей,
+ *     тому групування там взагалі не застосовується (див.
+ *     docs/architecture.md, "Відкриті питання").
  *
  * Вхід: шлях до layout_plan.json (записаного `inkforge-plan`) і шлях до
  * файла-основи (.indd попереднього випуску цієї газети).
@@ -153,18 +164,227 @@ function setRunningHeaderVariables(doc, issueDate, issueNumber) {
 }
 
 /**
- * ЗАГЛУШКА, навмисно не реалізована — див. коментар на початку файлу.
- * Коли profiles/<id>.yaml отримає мапу "роль статті -> Self ID фрейма" для
- * кожного автоматизованого розвороту, сюди додається реальна логіка:
- * очистити старий вміст фрейма, relink фото (itemLink.relink), застосувати
- * Horizontal Scale в межах 97-102%.
+ * Перетворює profiles/*.yaml `paragraph_style_roles` (роль -> назва стилю
+ * або масив назв) на зворотну мапу "назва стилю -> роль" для швидкого
+ * пошуку під час обходу фреймів сторінки.
  */
-function applyArticlesToPage(page, pagePlan) {
-    $.writeln(
-        "[TODO Рівень 2] Сторінка " + pagePlan.page + ": " + pagePlan.articles.length +
-        " стаття(ей) заплановано, але розчищення/relink фреймів ще не реалізовано " +
-        "(бракує мапи 'фрейм -> роль' у профілі газети)."
+function buildStyleToRoleMap(paragraphStyleRoles) {
+    var styleToRole = {};
+    for (var role in paragraphStyleRoles) {
+        if (!paragraphStyleRoles.hasOwnProperty(role)) {
+            continue;
+        }
+        var value = paragraphStyleRoles[role];
+        var styleNames = (value instanceof Array) ? value : [value];
+        for (var i = 0; i < styleNames.length; i++) {
+            styleToRole[styleNames[i]] = role;
+        }
+    }
+    return styleToRole;
+}
+
+/**
+ * Геометричні межі pageItem у координатах сторінки: [y0, x0, y1, x1]
+ * (той самий порядок, що повертає InDesign у geometricBounds).
+ */
+function itemBounds(item) {
+    return item.geometricBounds;
+}
+
+/**
+ * Довжина перетину двох діапазонів [x0, x1]; може бути 0 або від'ємною
+ * (немає перетину).
+ */
+function xOverlap(a0, a1, b0, b1) {
+    var lo = Math.max(a0, b0);
+    var hi = Math.min(a1, b1);
+    return hi - lo;
+}
+
+/**
+ * Збирає всі текстові й графічні фрейми, розміщені на цій сторінці (сама
+ * модель InDesign вже коректно прив'язує елементи до сторінки -- на
+ * відміну від ручного парсингу IDML-XML, тут не потрібен окремий фільтр
+ * "сміття на монтажному столі", InDesign сам його не поверне в page.*).
+ * Повертає масив {item, kind, role, bounds}; role може бути null (не
+ * підтримувана роль -- фрейм ігнорується подальшою кластеризацією, але
+ * лишається в списку для діагностики).
+ */
+function collectPageFrames(page, styleToRole) {
+    var frames = [];
+
+    var textFrames = page.textFrames.everyItem().getElements();
+    for (var i = 0; i < textFrames.length; i++) {
+        var tf = textFrames[i];
+        var role = null;
+        try {
+            if (tf.parentStory.paragraphs.length > 0) {
+                role = styleToRole[tf.parentStory.paragraphs.item(0).appliedParagraphStyle.name] || null;
+            }
+        } catch (e) {
+            role = null;
+        }
+        frames.push({ item: tf, kind: "text", role: role, bounds: itemBounds(tf) });
+    }
+
+    var photoCandidates = [].concat(
+        page.rectangles.everyItem().getElements(),
+        page.polygons.everyItem().getElements(),
+        page.ovals.everyItem().getElements()
     );
+    for (var j = 0; j < photoCandidates.length; j++) {
+        var shape = photoCandidates[j];
+        var hasImage = false;
+        try {
+            hasImage = shape.allGraphics.length > 0;
+        } catch (e2) {
+            hasImage = false;
+        }
+        if (hasImage) {
+            frames.push({ item: shape, kind: "photo", role: "photo", bounds: itemBounds(shape) });
+        }
+    }
+
+    return frames;
+}
+
+/**
+ * Групує фрейми сторінки навколо кожного заголовка (роль "headline") --
+ * перевірений на MIF алгоритм (див. docs/architecture.md, "Групування
+ * кількох статей..."; samples/article_clusters.py -- офлайн-валідація на
+ * реальних IDML-зразках). Повертає кластери у порядку читання заголовків
+ * (згори вниз, потім зліва направо); "members" містить решту фреймів
+ * (лід/тіло/фото), приписаних до цього заголовка.
+ */
+function findArticleClusters(page, styleToRole) {
+    var frames = collectPageFrames(page, styleToRole);
+
+    var headlines = [];
+    for (var i = 0; i < frames.length; i++) {
+        if (frames[i].role === "headline") {
+            headlines.push(frames[i]);
+        }
+    }
+    headlines.sort(function (a, b) {
+        if (a.bounds[0] !== b.bounds[0]) {
+            return a.bounds[0] - b.bounds[0];
+        }
+        return a.bounds[1] - b.bounds[1];
+    });
+
+    var clusters = [];
+    for (var h = 0; h < headlines.length; h++) {
+        clusters.push({ headline: headlines[h], members: [] });
+    }
+
+    for (var f = 0; f < frames.length; f++) {
+        var frame = frames[f];
+        if (frame.role === null || frame.role === "headline") {
+            continue;
+        }
+        var candidates = [];
+        for (var c = 0; c < headlines.length; c++) {
+            if (headlines[c].bounds[0] <= frame.bounds[0] + 1) {
+                candidates.push(c);
+            }
+        }
+        if (candidates.length === 0) {
+            continue; // немає заголовка вище -- лишається непризначеним, не вгадуємо
+        }
+        var sameColumn = [];
+        for (var k = 0; k < candidates.length; k++) {
+            var hl = headlines[candidates[k]];
+            if (xOverlap(hl.bounds[1], hl.bounds[3], frame.bounds[1], frame.bounds[3]) > 0) {
+                sameColumn.push(candidates[k]);
+            }
+        }
+        var pool = sameColumn.length > 0 ? sameColumn : candidates;
+        var bestIdx = pool[0];
+        for (var p = 1; p < pool.length; p++) {
+            if (headlines[pool[p]].bounds[0] > headlines[bestIdx].bounds[0]) {
+                bestIdx = pool[p];
+            }
+        }
+        clusters[bestIdx].members.push(frame);
+    }
+
+    return clusters;
+}
+
+/**
+ * Знаходить перший member-фрейм з роллю "photo" у кластері, або null.
+ */
+function findPhotoMember(cluster) {
+    for (var i = 0; i < cluster.members.length; i++) {
+        if (cluster.members[i].role === "photo") {
+            return cluster.members[i];
+        }
+    }
+    return null;
+}
+
+/**
+ * Групує сторінку за геометрією та (лише для фото) переприв'язує посилання
+ * на нові файли зі layout_plan.json. Вставка реального тексту заголовка/
+ * ліда/тіла НЕ виконується -- див. коментар на початку файлу.
+ *
+ * Захисний принцип: якщо мапа ролей для газети ще "TBD", або кількість
+ * знайдених кластерів не збігається з кількістю запланованих статей --
+ * сторінка пропускається без жодних змін (краще нічого не зробити, ніж
+ * вгадати неправильно).
+ */
+function applyArticlesToPage(page, pagePlan, plan) {
+    if (!plan.paragraph_style_roles || typeof plan.paragraph_style_roles !== "object") {
+        $.writeln(
+            "[Рівень 2] Сторінка " + pagePlan.page + ": paragraph_style_roles для газети '" +
+            plan.newspaper_id + "' ще не розв'язано (\"TBD\") -- групування статей і relink " +
+            "фото пропущено для цієї сторінки."
+        );
+        return;
+    }
+
+    var styleToRole = buildStyleToRoleMap(plan.paragraph_style_roles);
+    var clusters = findArticleClusters(page, styleToRole);
+
+    if (clusters.length !== pagePlan.articles.length) {
+        $.writeln(
+            "[Рівень 2] Сторінка " + pagePlan.page + ": знайдено " + clusters.length +
+            " кластер(и/ів) заголовків, але заплановано " + pagePlan.articles.length +
+            " статей(і) -- пропущено без змін (не вгадуємо парування)."
+        );
+        return;
+    }
+
+    var articles = pagePlan.articles.slice().sort(function (a, b) {
+        return a.order - b.order;
+    });
+
+    for (var i = 0; i < clusters.length; i++) {
+        var cluster = clusters[i];
+        var article = articles[i];
+        var photoMember = findPhotoMember(cluster);
+
+        if (photoMember && article.image_path) {
+            try {
+                photoMember.item.allGraphics[0].itemLink.relink(new File(article.image_path));
+                $.writeln(
+                    "[Рівень 2] Сторінка " + pagePlan.page + ", стаття '" + article.slug +
+                    "': фото переприв'язано на " + article.image_path + "."
+                );
+            } catch (e) {
+                $.writeln(
+                    "[Рівень 2] Сторінка " + pagePlan.page + ", стаття '" + article.slug +
+                    "': НЕ вдалося переприв'язати фото (" + e + ")."
+                );
+            }
+        }
+
+        $.writeln(
+            "[Рівень 2] Сторінка " + pagePlan.page + ": заголовковий фрейм (id " + cluster.headline.item.id +
+            ") <-> стаття '" + article.slug + "' (текст заголовка/ліда/тіла ще не вставлено -- " +
+            "потребує структурованого розбору .docx у Рівні 1)."
+        );
+    }
 }
 
 function main() {
@@ -187,12 +407,13 @@ function main() {
             continue; // ручні/спеціальні/поза межами/порожні сторінки не чіпаємо
         }
         var page = doc.pages.item(pagePlan.page - 1);
-        applyArticlesToPage(page, pagePlan);
+        applyArticlesToPage(page, pagePlan, plan);
     }
 
     $.writeln(
-        "Готово (частково): preflight шрифтів і колонтитул виконано, " +
-        "розчищення/relink фреймів статей ще не автоматизовано."
+        "Готово (частково): preflight шрифтів, колонтитул і геометричне групування статей " +
+        "(+ relink фото, лише для газет із розв'язаною мапою ролей) виконано; вставка тексту " +
+        "заголовка/ліда/тіла статей ще не автоматизована."
     );
 }
 
