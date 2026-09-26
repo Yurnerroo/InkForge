@@ -44,6 +44,7 @@ def _article_to_dict(article: ArticleContent) -> dict[str, Any]:
         "article_id": article.article_id,
         "page": article.page,
         "order": article.order,
+        "sub_order": article.sub_order,
         "slug": article.slug,
         "text_path": _optional_str(article.text_path),
         "image_path": _optional_str(article.image_path),

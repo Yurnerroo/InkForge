@@ -3,7 +3,7 @@ from pathlib import Path
 from docx import Document
 from docx.enum.style import WD_STYLE_TYPE
 
-from inkforge.content_checker.docreader import read_text_metrics
+from inkforge.content_checker.docreader import read_text_metrics, read_text_metrics_multi
 
 
 def test_read_txt_single_line_is_title_only(tmp_path: Path) -> None:
@@ -31,31 +31,33 @@ def test_read_txt_two_lines_is_title_and_body_no_lead(tmp_path: Path) -> None:
     assert result.has_lead_paragraph is False
 
 
-def test_read_txt_three_lines_detects_short_second_line_as_lead(tmp_path: Path) -> None:
+def test_read_txt_three_lines_detects_lead_without_trailing_period(tmp_path: Path) -> None:
     path = tmp_path / "article.txt"
     path.write_text(
-        "Заголовок статті\nКороткий лід.\nДовший основний текст статті з деталями.",
+        "Заголовок статті\nКороткий лід\nДовший основний текст статті з деталями.",
         encoding="utf-8",
     )
 
     result = read_text_metrics(path)
 
     assert result.title == "Заголовок статті"
-    assert result.lead == "Короткий лід."
+    assert result.lead == "Короткий лід"
     assert result.body == "Довший основний текст статті з деталями."
     assert result.has_lead_paragraph is True
 
 
-def test_read_txt_long_second_line_goes_to_body_not_lead(tmp_path: Path) -> None:
-    long_line = "Д" * 300
+def test_read_txt_second_line_with_period_goes_to_body_not_lead(tmp_path: Path) -> None:
     path = tmp_path / "article.txt"
-    path.write_text(f"Заголовок\n{long_line}\nТретій рядок тіла.", encoding="utf-8")
+    path.write_text(
+        "Заголовок\nКороткий лід.\nТретій рядок тіла.",
+        encoding="utf-8",
+    )
 
     result = read_text_metrics(path)
 
     assert result.title == "Заголовок"
     assert result.lead == ""
-    assert result.body == f"{long_line}\nТретій рядок тіла."
+    assert result.body == "Короткий лід.\nТретій рядок тіла."
 
 
 def test_read_docx_detects_title_and_lead_styles(tmp_path: Path) -> None:
@@ -139,3 +141,74 @@ def test_read_text_metrics_unknown_extension(tmp_path: Path) -> None:
     result = read_text_metrics(path)
 
     assert any("Unsupported text format" in w for w in result.warnings)
+
+
+def test_read_txt_multi_splits_two_articles_separated_by_blank_line(tmp_path: Path) -> None:
+    path = tmp_path / "article.txt"
+    path.write_text(
+        "Заголовок першої статті\n"
+        "Лід першої статті\n"
+        "Тіло першої статті з деталями.\n"
+        "\n"
+        "Заголовок другої статті\n"
+        "Тіло другої статті без ліда.",
+        encoding="utf-8",
+    )
+
+    results = read_text_metrics_multi(path)
+
+    assert len(results) == 2
+    assert results[0].title == "Заголовок першої статті"
+    assert results[0].lead == "Лід першої статті"
+    assert results[0].body == "Тіло першої статті з деталями."
+    assert results[1].title == "Заголовок другої статті"
+    assert results[1].lead == ""
+    assert results[1].body == "Тіло другої статті без ліда."
+
+
+def test_read_txt_multi_two_blank_lines_between_articles_work_the_same(tmp_path: Path) -> None:
+    path = tmp_path / "article.txt"
+    path.write_text(
+        "Заголовок один\nТіло одне.\n\n\nЗаголовок два\nТіло два.",
+        encoding="utf-8",
+    )
+
+    results = read_text_metrics_multi(path)
+
+    assert len(results) == 2
+    assert results[0].title == "Заголовок один"
+    assert results[1].title == "Заголовок два"
+
+
+def test_read_txt_multi_single_article_returns_one_result(tmp_path: Path) -> None:
+    path = tmp_path / "article.txt"
+    path.write_text(
+        "Заголовок\nЛід\nПерший абзац тіла.\nДругий абзац тіла, теж з крапкою.",
+        encoding="utf-8",
+    )
+
+    results = read_text_metrics_multi(path)
+
+    assert len(results) == 1
+    assert results[0].title == "Заголовок"
+    assert results[0].lead == "Лід"
+    assert results[0].body == "Перший абзац тіла.\nДругий абзац тіла, теж з крапкою."
+
+
+def test_read_docx_multi_splits_without_recognized_styles(tmp_path: Path) -> None:
+    document = Document()
+    document.add_paragraph("Заголовок першої")
+    document.add_paragraph("Тіло першої статті.")
+    document.add_paragraph("Заголовок другої")
+    document.add_paragraph("Тіло другої статті.")
+    path = tmp_path / "article.docx"
+    document.save(str(path))
+
+    results = read_text_metrics_multi(path)
+
+    assert len(results) == 2
+    assert results[0].title == "Заголовок першої"
+    assert results[0].body == "Тіло першої статті."
+    assert results[1].title == "Заголовок другої"
+    assert results[1].body == "Тіло другої статті."
+    assert all(any("positional fallback" in w for w in r.warnings) for r in results)

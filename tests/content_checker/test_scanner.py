@@ -94,3 +94,33 @@ def test_scan_issue_sorts_pages_and_articles_numerically(tmp_path: Path) -> None
 
     assert [p.page for p in issue.pages] == ["01", "02", "10"]
     assert [a.order for a in issue.pages[0].articles] == [1, 2]
+
+
+def test_scan_issue_splits_multi_article_file_and_attaches_photo_to_first_only(
+    tmp_path: Path,
+) -> None:
+    page_dir = tmp_path / "07"
+    page_dir.mkdir()
+    (page_dir / "7_1_multi.txt").write_text(
+        "Заголовок першої\nТіло першої статті.\n\nЗаголовок другої\nТіло другої статті.",
+        encoding="utf-8",
+    )
+    (page_dir / "7_1_multi.jpg").write_bytes(b"\xff\xd8\xff\xd9")
+
+    issue = scan_issue(tmp_path)
+
+    page = issue.pages[0]
+    assert len(page.articles) == 2
+
+    first, second = page.articles
+    assert first.article_id == "07_1_multi"
+    assert first.sub_order == 0
+    assert first.title == "Заголовок першої"
+    assert first.image_path is not None
+
+    assert second.article_id == "07_1_multi_1"
+    assert second.sub_order == 1
+    assert second.title == "Заголовок другої"
+    assert second.image_path is None
+
+    assert any("Split from a multi-article file" in w for w in issue.all_warnings)

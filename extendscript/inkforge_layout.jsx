@@ -499,8 +499,14 @@ function applyArticlesToPage(page, pagePlan, plan) {
         return;
     }
 
+    // Tie-break on sub_order (present when several articles were split out
+    // of one multi-article source file and share the same order) -- the
+    // ExtendScript engine's Array.sort is not guaranteed stable, so an
+    // explicit compound key is required here even though Python's sort
+    // already handles this correctly via stability alone.
     var articles = pagePlan.articles.slice().sort(function (a, b) {
-        return a.order - b.order;
+        if (a.order !== b.order) return a.order - b.order;
+        return (a.sub_order || 0) - (b.sub_order || 0);
     });
 
     for (var i = 0; i < clusters.length; i++) {

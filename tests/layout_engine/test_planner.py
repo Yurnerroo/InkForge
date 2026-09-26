@@ -48,6 +48,7 @@ def _article(
     title: str = "",
     lead: str = "",
     body: str = "",
+    sub_order: int = 0,
 ) -> dict[str, Any]:
     return {
         "article_id": article_id,
@@ -60,6 +61,7 @@ def _article(
         "title": title,
         "lead": lead,
         "body": body,
+        "sub_order": sub_order,
     }
 
 
@@ -302,3 +304,40 @@ def test_planned_page_defaults_missing_title_lead_body_to_empty_strings() -> Non
     assert article.title == ""
     assert article.lead == ""
     assert article.body == ""
+
+
+def test_planned_page_carries_sub_order_for_split_articles() -> None:
+    """sub_order (tie-break for articles split out of one multi-article
+    source file) must reach the plan JSON so the ExtendScript executor can
+    sort deterministically even though its Array.sort isn't stable."""
+
+    profile = _make_profile()
+    manifest = _manifest(
+        [
+            {
+                "page": "2",
+                "articles": [
+                    _article("2_1_a", 1, "a", 50, sub_order=0),
+                    _article("2_1_a_1", 1, "a", 50, sub_order=1),
+                ],
+            }
+        ]
+    )
+
+    plan = build_layout_plan(manifest, profile)
+    articles = plan.pages[0].articles
+
+    assert [a.sub_order for a in articles] == [0, 1]
+
+
+def test_planned_page_defaults_missing_sub_order_to_zero() -> None:
+    """Backward compatibility: manifests written before sub_order existed
+    (or any article dict omitting it) must default to 0, not error out."""
+
+    profile = _make_profile()
+    manifest = _manifest([{"page": "2", "articles": [_article("2_1_a", 1, "a", 100)]}])
+    del manifest["pages"][0]["articles"][0]["sub_order"]
+
+    plan = build_layout_plan(manifest, profile)
+
+    assert plan.pages[0].articles[0].sub_order == 0
