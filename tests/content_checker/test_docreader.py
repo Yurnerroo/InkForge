@@ -199,6 +199,7 @@ def test_read_docx_multi_splits_without_recognized_styles(tmp_path: Path) -> Non
     document = Document()
     document.add_paragraph("Заголовок першої")
     document.add_paragraph("Тіло першої статті.")
+    document.add_paragraph("")
     document.add_paragraph("Заголовок другої")
     document.add_paragraph("Тіло другої статті.")
     path = tmp_path / "article.docx"
@@ -212,3 +213,41 @@ def test_read_docx_multi_splits_without_recognized_styles(tmp_path: Path) -> Non
     assert results[1].title == "Заголовок другої"
     assert results[1].body == "Тіло другої статті."
     assert all(any("positional fallback" in w for w in r.warnings) for r in results)
+
+
+def test_read_docx_multi_does_not_split_on_bold_subheadline_without_blank_gap(
+    tmp_path: Path,
+) -> None:
+    """Regression test for a real false-positive found in production content:
+    a period-less bold subheadline inside the body (no blank line before it)
+    must stay part of the same article, not be misread as a new one."""
+
+    document = Document()
+    document.add_paragraph("Заголовок статті")
+    document.add_paragraph("Перший абзац тіла статті.")
+    subheadline = document.add_paragraph()
+    run = subheadline.add_run("Чи це підзаголовок без крапки?")
+    run.bold = True
+    document.add_paragraph("Абзац тіла статті після підзаголовка.")
+    path = tmp_path / "article.docx"
+    document.save(str(path))
+
+    results = read_text_metrics_multi(path)
+
+    assert len(results) == 1
+    assert results[0].title == "Заголовок статті"
+    assert "Чи це підзаголовок без крапки?" in results[0].body
+    assert "Абзац тіла статті після підзаголовка." in results[0].body
+
+
+def test_read_txt_multi_does_not_split_without_blank_gap(tmp_path: Path) -> None:
+    path = tmp_path / "article.txt"
+    path.write_text(
+        "Заголовок статті\nПерший абзац тіла.\nЦе підзаголовок без крапки\nДругий абзац тіла.",
+        encoding="utf-8",
+    )
+
+    results = read_text_metrics_multi(path)
+
+    assert len(results) == 1
+    assert results[0].title == "Заголовок статті"
