@@ -70,6 +70,11 @@ Windows+InDesign) сам керує InDesign через COM — одна сто�
 (ручне доправлення) → "Експорт друк-PDF". Деталі —
 [docs/architecture.md](docs/architecture.md), розділ "Рівень 3".
 
+**Windows, без командного рядка:** подвійний клік на `setup.bat` (один раз),
+далі щоразу — на `start_launcher.bat`.
+
+**Або вручну:**
+
 ```bash
 pip install -e ".[launcher]"
 inkforge-launcher
