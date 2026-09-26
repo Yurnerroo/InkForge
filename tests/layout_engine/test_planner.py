@@ -43,6 +43,9 @@ def _article(
     has_image: bool = True,
     text_path: str | None = None,
     image_path: str | None = None,
+    title: str = "",
+    lead: str = "",
+    body: str = "",
 ) -> dict[str, Any]:
     return {
         "article_id": article_id,
@@ -52,6 +55,9 @@ def _article(
         "image": {"width": 100, "height": 100} if has_image else None,
         "text_path": text_path,
         "image_path": image_path,
+        "title": title,
+        "lead": lead,
+        "body": body,
     }
 
 
@@ -197,3 +203,47 @@ def test_pages_are_sorted_by_page_number() -> None:
     plan = build_layout_plan(manifest, profile)
 
     assert [page.page for page in plan.pages] == [1, 6]
+
+
+def test_planned_page_carries_title_lead_body_for_the_extendscript_executor() -> None:
+    profile = _make_profile()
+    manifest = _manifest(
+        [
+            {
+                "page": "2",
+                "articles": [
+                    _article(
+                        "2_1_a",
+                        1,
+                        "a",
+                        100,
+                        title="Гучний заголовок",
+                        lead="Короткий лід.",
+                        body="Основний текст статті.",
+                    )
+                ],
+            }
+        ]
+    )
+
+    plan = build_layout_plan(manifest, profile)
+    article = plan.pages[0].articles[0]
+
+    assert article.title == "Гучний заголовок"
+    assert article.lead == "Короткий лід."
+    assert article.body == "Основний текст статті."
+
+
+def test_planned_page_defaults_missing_title_lead_body_to_empty_strings() -> None:
+    profile = _make_profile()
+    manifest = _manifest([{"page": "2", "articles": [_article("2_1_a", 1, "a", 100)]}])
+    del manifest["pages"][0]["articles"][0]["title"]
+    del manifest["pages"][0]["articles"][0]["lead"]
+    del manifest["pages"][0]["articles"][0]["body"]
+
+    plan = build_layout_plan(manifest, profile)
+    article = plan.pages[0].articles[0]
+
+    assert article.title == ""
+    assert article.lead == ""
+    assert article.body == ""

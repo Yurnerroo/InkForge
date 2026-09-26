@@ -114,11 +114,14 @@ def _scan_page_folder(folder: Path) -> PageContent:
         if article.text_path is None:
             article.warnings.append("Photo found without a matching text file")
         else:
-            metrics = read_text_metrics(article.text_path)
-            article.word_count = metrics.word_count
-            article.char_count = metrics.char_count
-            article.has_lead_paragraph = metrics.has_lead_paragraph
-            article.warnings.extend(metrics.warnings)
+            text = read_text_metrics(article.text_path)
+            article.title = text.title
+            article.lead = text.lead
+            article.body = text.body
+            article.word_count = text.word_count
+            article.char_count = text.char_count
+            article.has_lead_paragraph = text.has_lead_paragraph
+            article.warnings.extend(text.warnings)
 
         if article.image_path is not None:
             article.image_info = read_image_info(article.image_path)
