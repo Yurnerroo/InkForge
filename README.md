@@ -9,9 +9,12 @@ by hand afterwards.
 
 > **Status:** Level 1 (Content Checker) is done and tested. Level 2 (layout
 > planning) has a complete, tested Python side (`inkforge-plan`); the InDesign
-> ExtendScript executor is a work in progress and has not yet been run
-> against a real InDesign installation (see
-> [extendscript/README.md](extendscript/README.md)).
+> ExtendScript executor now handles geometric article-frame clustering and
+> photo relink for one newspaper (MIF), but is still not verified against a
+> real InDesign installation (see
+> [extendscript/README.md](extendscript/README.md)). Level 3 (One-Click
+> Launcher, FastAPI) has a working, tested scaffold; its InDesign-COM step is
+> also unverified in a real environment.
 
 ## The problem
 
@@ -36,12 +39,18 @@ one validated step at a time, for **4+ different newspaper templates**.
 - **Config-driven architecture**: a single shared engine reads a per-newspaper
   YAML profile (`profiles/<id>.yaml`) — no newspaper-specific names, styles,
   or frame IDs are ever hardcoded in the shared code.
+- **A small local FastAPI service** (`launcher/`) orchestrates the pipeline
+  end to end and drives a desktop application (Adobe InDesign) via Windows
+  COM automation — a real, if unconventional, backend-integration surface on
+  top of the pure data-processing pieces.
 - **Docs-first, incrementally shipped**: every capability lands as a small,
   independently reviewed pull request with its own commits and tests —
   architecture and requirements docs are updated alongside the code, not
   after the fact.
-- **54 passing unit tests** (`pytest`) covering content parsing, layout
-  planning, and JSON plan serialization.
+- **66 passing unit tests** (`pytest`) covering content parsing, layout
+  planning, JSON plan serialization, and the Level 3 API (with a real,
+  environment-honest test asserting the COM step fails gracefully when
+  InDesign isn't available, rather than mocking it away).
 
 ## Architecture — 4 levels of automation
 
@@ -50,7 +59,7 @@ one validated step at a time, for **4+ different newspaper templates**.
 | 0 | Fully manual baseline (today, before this project) | n/a |
 | 1 | **Content Checker** — scans a weekly issue folder, matches text+photo files, computes word counts and photo metadata (size/DPI/color mode), reports problems, writes `manifest.json` | ✅ Done |
 | 2 | **Auto-Layout** — Python planner turns `manifest.json` + a newspaper profile into `layout_plan.json`; an InDesign ExtendScript executor applies it (font preflight, running headers, geometric article-frame clustering, photo relink) | 🚧 In progress |
-| 3 | **One-Click Launcher** — simple GUI to drive Levels 1-2 and export the final print PDF | ⏳ Not started |
+| 3 | **One-Click Launcher** — local FastAPI web app driving Levels 1-2, plus (Windows-only) COM automation to run the InDesign executor without switching windows | 🚧 In progress |
 | 4 | Optional future extras: auto photo cropping, headline auto-balancing, batch layout for multiple newspapers, issue history/versioning | 💡 Future idea |
 
 See [docs/architecture.md](docs/architecture.md) for the full breakdown,
@@ -59,11 +68,13 @@ including findings from analyzing real IDML samples across newspapers.
 ## Tech stack
 
 - **Python** — content validation (`src/inkforge/content_checker`), layout
-  planning (`src/inkforge/layout_engine`), and (planned) the Level 3 launcher.
+  planning (`src/inkforge/layout_engine`), and the Level 3 launcher
+  (`src/inkforge/launcher`, FastAPI).
 - **Adobe InDesign ExtendScript** — the actual in-InDesign layout automation
   and print-PDF export, because that is the most reliable way to reproduce
   real newspaper typesetting (CMYK, bleed, `PDF/X-1a:2001`).
-- **pytest**, **PyYAML**, **python-docx**, **Pillow**.
+- **pytest**, **PyYAML**, **python-docx**, **Pillow**, **FastAPI**,
+  **pywin32** (Windows-only, for InDesign COM automation).
 
 ## Repository layout
 
@@ -73,6 +84,7 @@ profiles/                  one YAML profile per newspaper (schema: profiles/sche
 src/inkforge/
   content_checker/         Level 1: scans an issue, builds manifest.json
   layout_engine/           Level 2 (Python side): manifest.json + profile -> layout_plan.json
+  launcher/                Level 3: FastAPI app driving Levels 1-2 and InDesign
 extendscript/              Level 2 (InDesign side): executor for layout_plan.json (in progress)
 tests/                     pytest suite for the Python side
 ```
@@ -87,6 +99,10 @@ inkforge-check path/to/2026-W40_newspaper-x --newspaper "some_profile_id"
 
 # Level 2: turn the manifest into a layout plan
 inkforge-plan path/to/2026-W40_newspaper-x/manifest.json --profile some_profile_id
+
+# Level 3: local one-click launcher (adds fastapi/uvicorn/pywin32)
+pip install -e ".[launcher]"
+inkforge-launcher
 
 # run the test suite
 pytest
