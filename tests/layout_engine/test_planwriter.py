@@ -39,7 +39,15 @@ def test_write_layout_plan_produces_valid_json(tmp_path: Path) -> None:
             {
                 "page": "2",
                 "articles": [
-                    {"article_id": "2_1_a", "order": 1, "slug": "a", "word_count": 10, "image": None}
+                    {
+                        "article_id": "2_1_a",
+                        "order": 1,
+                        "slug": "a",
+                        "word_count": 10,
+                        "image": None,
+                        "text_path": "/tmp/issue/2/2_1_a.docx",
+                        "image_path": None,
+                    }
                 ],
             }
         ],
@@ -54,4 +62,5 @@ def test_write_layout_plan_produces_valid_json(tmp_path: Path) -> None:
     assert "generated_at" in data
     assert data["pages"][0]["page"] == 2
     assert data["pages"][0]["articles"][0]["article_id"] == "2_1_a"
+    assert data["pages"][0]["articles"][0]["text_path"] == "/tmp/issue/2/2_1_a.docx"
     assert data["paragraph_style_roles"] == {"body": ["Body"]}

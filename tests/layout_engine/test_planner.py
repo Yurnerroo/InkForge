@@ -35,13 +35,23 @@ def _make_profile(**overrides: Any) -> NewspaperProfile:
     return NewspaperProfile(**defaults)
 
 
-def _article(article_id: str, order: int, slug: str, word_count: int, has_image: bool = True) -> dict[str, Any]:
+def _article(
+    article_id: str,
+    order: int,
+    slug: str,
+    word_count: int,
+    has_image: bool = True,
+    text_path: str | None = None,
+    image_path: str | None = None,
+) -> dict[str, Any]:
     return {
         "article_id": article_id,
         "order": order,
         "slug": slug,
         "word_count": word_count,
         "image": {"width": 100, "height": 100} if has_image else None,
+        "text_path": text_path,
+        "image_path": image_path,
     }
 
 
@@ -96,7 +106,14 @@ def test_planned_page_distributes_text_share_proportionally() -> None:
             {
                 "page": "2",
                 "articles": [
-                    _article("2_1_a", 1, "a", 300),
+                    _article(
+                        "2_1_a",
+                        1,
+                        "a",
+                        300,
+                        text_path="/tmp/issue/2/2_1_a.docx",
+                        image_path="/tmp/issue/2/2_1_a.jpg",
+                    ),
                     _article("2_2_b", 2, "b", 100, has_image=False),
                 ],
             }
@@ -114,6 +131,10 @@ def test_planned_page_distributes_text_share_proportionally() -> None:
     assert page.articles[0].has_image is True
     assert page.articles[1].has_image is False
     assert page.articles[0].image_color_mode == "grayscale"
+    assert page.articles[0].text_path == "/tmp/issue/2/2_1_a.docx"
+    assert page.articles[0].image_path == "/tmp/issue/2/2_1_a.jpg"
+    assert page.articles[1].text_path is None
+    assert page.articles[1].image_path is None
 
 
 def test_empty_automatable_page_is_flagged() -> None:
