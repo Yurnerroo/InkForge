@@ -33,6 +33,12 @@
  *      фрейм НЕ чіпається далі (зменшення/прибирання фото не
  *      автоматизовано, потребує підтвердження пріоритету дій у
  *      верстальниці).
+ *   6. Чергування шрифту заголовка (applyHeadlineFontAlternation) — лише
+ *      коли layout_plan.json несе підтверджене правило
+ *      headline_font_alternation (наразі тільки "Ти і Я"; див.
+ *      profiles/ty_i_ya.yaml): сусідні статті на сторінці отримують
+ *      почергово різний з 2 заданих шрифтів. Якщо шрифт не встановлено на
+ *      машині — пропускається з попередженням у лог, а не підміняється.
  *
  * ЩЕ НЕ РЕАЛІЗОВАНО (навмисно, не забуто):
  *   - Динамічне додавання/видалення фреймів під новий обсяг тексту, коли
@@ -403,6 +409,63 @@ function fitFrameText(item, minScale) {
 }
 
 /**
+ * Застосовує підтверджене верстальницею правило чергування шрифту
+ * заголовка (див. profiles/ty_i_ya.yaml, поле headline_font_alternation):
+ * сусідні статті на одній сторінці отримують почергово різний шрифт із
+ * "fonts" (за порядком читання -- той самий порядок кластерів, що й у
+ * findArticleClusters/applyArticlesToPage). "articleIndex" -- 0-базований
+ * індекс статті В МЕЖАХ ЦІЄЇ СТОРІНКИ (не всього номера), бо чергування
+ * підтверджено саме "на одній сторінці".
+ *
+ * Захисний принцип: якщо правило не підтверджено (`confirmed !== true`),
+ * не задано, чи задано менше 2 шрифтів -- нічого не робить. Якщо потрібний
+ * шрифт не встановлено на цій машині -- лише пише попередження в лог і не
+ * чіпає фрейм (не підставляємо інший шрифт замість нього).
+ */
+function applyHeadlineFontAlternation(item, plan, articleIndex, pageNumber, slug) {
+    var alternation = plan.headline_font_alternation;
+    if (!alternation || alternation.confirmed !== true) {
+        return;
+    }
+    var fonts = alternation.fonts;
+    if (!fonts || fonts.length < 2) {
+        return;
+    }
+
+    var fontName = fonts[articleIndex % fonts.length];
+    var font = app.fonts.itemByName(fontName);
+    if (!font.isValid) {
+        $.writeln(
+            "[Рівень 2] Сторінка " + pageNumber + ", стаття '" + slug + "': шрифт '" + fontName +
+            "' для чергування заголовка не знайдено на цій машині -- пропущено без змін."
+        );
+        return;
+    }
+
+    try {
+        item.texts[0].appliedFont = font;
+        try {
+            item.texts[0].fontStyle = "Bold";
+        } catch (styleErr) {
+            $.writeln(
+                "[Рівень 2] Сторінка " + pageNumber + ", стаття '" + slug + "': шрифт '" + fontName +
+                "' встановлено, але стиль 'Bold' для нього недоступний (" + styleErr + ")."
+            );
+        }
+        $.writeln(
+            "[Рівень 2] Сторінка " + pageNumber + ", стаття '" + slug +
+            "': шрифт заголовка встановлено на '" + fontName + "' (чергування, позиція " +
+            articleIndex + " на сторінці)."
+        );
+    } catch (e) {
+        $.writeln(
+            "[Рівень 2] Сторінка " + pageNumber + ", стаття '" + slug +
+            "': НЕ вдалося застосувати шрифт '" + fontName + "' (" + e + ")."
+        );
+    }
+}
+
+/**
  * Групує сторінку за геометрією, (для фото) переприв'язує посилання на
  * нові файли зі layout_plan.json і вставляє текст заголовка/ліда/тіла
  * статті у відповідні за роллю фрейми (headline / lead_intro / body).
@@ -478,6 +541,7 @@ function applyArticlesToPage(page, pagePlan, plan) {
             if (!fitFrameText(cluster.headline.item, minScale)) {
                 overset.push("заголовок");
             }
+            applyHeadlineFontAlternation(cluster.headline.item, plan, i, pagePlan.page, article.slug);
         } else {
             skipped.push("заголовок");
         }
@@ -545,9 +609,10 @@ function main() {
 
     $.writeln(
         "Готово (частково): preflight шрифтів, колонтитул, геометричне групування статей, " +
-        "relink фото, вставка тексту заголовка/ліда/тіла та підтискання overset-тексту " +
-        "(Horizontal Scale) виконано для газет із розв'язаною мапою ролей " +
-        "(paragraph_style_roles); перевірка на реальному InDesign ще потрібна."
+        "relink фото, вставка тексту заголовка/ліда/тіла, підтискання overset-тексту " +
+        "(Horizontal Scale) та чергування шрифту заголовка (де підтверджено) виконано для " +
+        "газет із розв'язаною мапою ролей (paragraph_style_roles); перевірка на реальному " +
+        "InDesign ще потрібна."
     );
 }
 
