@@ -45,6 +45,9 @@ class ArticlePlan:
     title: str = ""
     lead: str = ""
     body: str = ""
+    subheading_indices: list[int] = field(default_factory=list)
+    """0-based indices into ``body.split(\"\\n\")`` of paragraphs that must
+    be rendered with the subheadline paragraph style role in JSX."""
 
 
 @dataclass
@@ -184,6 +187,7 @@ def _plan_for_page(
             title=article.get("title") or "",
             lead=article.get("lead") or "",
             body=article.get("body") or "",
+            subheading_indices=list(article.get("subheading_indices") or []),
         )
         for article in articles_raw
     ]
@@ -276,6 +280,7 @@ def _plan_page1_special(
                 title=article.get("title") or "",
                 lead=article.get("lead") or "",
                 body=article.get("body") or "",
+                subheading_indices=list(article.get("subheading_indices") or []),
             )
         )
 

@@ -51,6 +51,13 @@ class ArticleText:
     word_count: int = 0
     char_count: int = 0
     has_lead_paragraph: bool = False
+    subheading_indices: list[int] = field(default_factory=list)
+    """0-based indices into ``body``'s paragraphs (splitting on ``\\n``) that
+    are interior subheadlines rather than regular body paragraphs -- see
+    docs/content-structure.md, "Підзаголовки всередині тіла статті". Used by
+    the ExtendScript executor to apply the newspaper's subheadline paragraph
+    style (``paragraph_style_roles.subheadline``) to just those paragraphs
+    after inserting the body text."""
     warnings: list[str] = field(default_factory=list)
 
 
@@ -114,7 +121,10 @@ def _read_txt_multi(path: Path) -> list[ArticleText]:
     splits = _split_positional_multi(paragraphs, blank_before)
     if not splits:
         return [ArticleText()]
-    return [_build_result(title, lead, body) for title, lead, body in splits]
+    return [
+        _build_result(title, lead, body, subheading_indices=subheading_indices)
+        for title, lead, body, subheading_indices in splits
+    ]
 
 
 def _read_docx_multi(path: Path) -> list[ArticleText]:
@@ -131,7 +141,7 @@ def _read_docx_multi(path: Path) -> list[ArticleText]:
         return [ArticleText(warnings=[f"Could not read .docx file: {exc}"])]
 
     non_empty = [p for p in document.paragraphs if p.text.strip()]
-    paragraphs = [p.text.strip() for p in non_empty]
+    paragraphs = [_normalize_paragraph_text(p.text) for p in non_empty]
     blank_before = _blank_gaps_from_lines([p.text for p in document.paragraphs])
 
     title_idx = _find_style_match(non_empty, _TITLE_STYLE_HINTS)
@@ -144,20 +154,27 @@ def _read_docx_multi(path: Path) -> list[ArticleText]:
         title = paragraphs[title_idx] if title_idx is not None else ""
         lead = paragraphs[lead_idx] if lead_idx is not None else ""
         skip = {i for i in (title_idx, lead_idx) if i is not None}
-        body = "\n".join(p for i, p in enumerate(paragraphs) if i not in skip)
-        return [_build_result(title, lead, body)]
+        body_paragraphs = [p for i, p in enumerate(paragraphs) if i not in skip]
+        subheading_indices = [
+            j for j, p in enumerate(body_paragraphs) if not _ends_with_period(p)
+        ]
+        body = "\n".join(body_paragraphs)
+        return [_build_result(title, lead, body, subheading_indices=subheading_indices)]
 
     splits = _split_positional_multi(paragraphs, blank_before)
     warnings = []
     if paragraphs:
         warnings.append(
             "No recognized title/lead paragraph style found; used positional "
-            "fallback (first paragraph = title, second = lead if it also "
-            "lacks a trailing period) — please double-check the split"
+            "fallback (first paragraph = title, second = lead, period-less "
+            "interior paragraphs = subheadings) — please double-check the split"
         )
     if not splits:
         return [_build_result("", "", "", warnings=warnings)]
-    results = [_build_result(title, lead, body) for title, lead, body in splits]
+    results = [
+        _build_result(title, lead, body, subheading_indices=subheading_indices)
+        for title, lead, body, subheading_indices in splits
+    ]
     for result in results:
         result.warnings = warnings + result.warnings
     return results
@@ -172,6 +189,25 @@ def _find_style_match(paragraphs: list, hints: tuple[str, ...]) -> int | None:
         if any(hint in style_name.lower() for hint in hints):
             return i
     return None
+
+
+def _normalize_paragraph_text(text: str) -> str:
+    """Collapse manual line breaks (Shift+Enter, ``<w:br/>``) embedded
+    *within* one python-docx paragraph into a single space.
+
+    python-docx exposes a manual line break as a literal ``\\n``/``\\r``
+    inside ``paragraph.text`` -- indistinguishable from a real paragraph
+    boundary once extracted as a plain string. Left unnormalized, a title
+    or lead written across two visual lines in Word (via Shift+Enter, not
+    a real paragraph break) reaches the ExtendScript executor as
+    ``title + "\\n" + body``, which InDesign then treats as an actual
+    paragraph break -- so only the text before the embedded break gets the
+    headline paragraph style (confirmed real-world bug: "Прогноз магнітних
+    бур" headline only partially styled).
+    """
+
+    collapsed = re.sub(r"[\r\n\v\f]+", " ", text)
+    return re.sub(r" {2,}", " ", collapsed).strip()
 
 
 def _blank_gaps_from_lines(lines: list[str]) -> list[bool]:
@@ -207,7 +243,7 @@ def _ends_with_period(text: str) -> bool:
 
 def _split_positional_multi(
     paragraphs: list[str], blank_before: list[bool] | None = None
-) -> list[tuple[str, str, str]]:
+) -> list[tuple[str, str, str, list[int]]]:
     """Split ``paragraphs`` into one or more articles using the confirmed
     convention (docs/content-structure.md, "Кілька статей в одному файлі"):
 
@@ -216,11 +252,18 @@ def _split_positional_multi(
       a new article starts only where there is BOTH an actual blank
       line/paragraph gap (``blank_before[i]``) AND a period-less
       paragraph right after that gap).
-    - If the paragraph right after a title also lacks a trailing period,
-      it's that article's lead/subheadline.
-    - Everything else is body, accumulated until the next real article
-      boundary. One or two blank lines between articles both work the
-      same way -- only presence/absence of a gap matters, not the count.
+    - The paragraph right after a title is unconditionally that article's
+      lead (regardless of whether it ends with a period) -- confirmed
+      convention: the first paragraph of an article's body is always its
+      lead/intro.
+    - Any later paragraph that does NOT end with a period is an interior
+      subheading (there can be several through one article's body) --
+      its 0-based index within the assembled ``body`` (splitting on
+      ``\\n``) is recorded in the returned ``subheading_indices`` list.
+    - Everything else is regular body text, accumulated until the next
+      real article boundary. One or two blank lines between articles
+      both work the same way -- only presence/absence of a gap matters,
+      not the count.
 
     ``blank_before`` must be aligned with ``paragraphs`` (same length,
     ``blank_before[i]`` true iff a blank line/paragraph preceded
@@ -237,37 +280,61 @@ def _split_positional_multi(
         blank_before = [False] * len(paragraphs)
 
     def consume_lead(i: int, lead_holder: list[str]) -> int:
-        if i < len(paragraphs) and not _ends_with_period(paragraphs[i]):
+        if i < len(paragraphs):
             lead_holder.append(paragraphs[i])
             return i + 1
         return i
 
-    articles: list[tuple[str, str, str]] = []
+    articles: list[tuple[str, str, str, list[int]]] = []
     title = paragraphs[0]
     lead_holder: list[str] = []
     i = consume_lead(1, lead_holder)
     body_parts: list[str] = []
+    subheading_indices: list[int] = []
 
     while i < len(paragraphs):
         para = paragraphs[i]
-        if body_parts and blank_before[i] and not _ends_with_period(para):
-            # Body text already started, a blank-line gap precedes this
-            # paragraph, and it doesn't end with a period -- a new
-            # article begins here.
-            articles.append((title, lead_holder[0] if lead_holder else "", "\n".join(body_parts)))
+        if blank_before[i] and not _ends_with_period(para):
+            # A blank-line gap precedes this paragraph, and it doesn't end
+            # with a period -- a new article begins here (the title+lead
+            # of the current article were already consumed above, so this
+            # check doesn't need to wait for body_parts to be non-empty).
+            articles.append(
+                (
+                    title,
+                    lead_holder[0] if lead_holder else "",
+                    "\n".join(body_parts),
+                    subheading_indices,
+                )
+            )
             title = para
             lead_holder = []
             body_parts = []
+            subheading_indices = []
             i = consume_lead(i + 1, lead_holder)
             continue
+        if not _ends_with_period(para):
+            # Period-less paragraph with no preceding blank-line gap (or
+            # body hasn't started yet) -- an interior subheading, not a
+            # new article.
+            subheading_indices.append(len(body_parts))
         body_parts.append(para)
         i += 1
 
-    articles.append((title, lead_holder[0] if lead_holder else "", "\n".join(body_parts)))
+    articles.append(
+        (title, lead_holder[0] if lead_holder else "", "\n".join(body_parts), subheading_indices)
+    )
     return articles
 
 
-def _build_result(title: str, lead: str, body: str, *, warnings: list[str] | None = None) -> ArticleText:
+def _build_result(
+    title: str,
+    lead: str,
+    body: str,
+    *,
+    subheading_indices: list[int] | None = None,
+    warnings: list[str] | None = None,
+) -> ArticleText:
     full_text = "\n".join(p for p in (title, lead, body) if p)
     word_count = len(_WORD_PATTERN.findall(full_text))
     char_count = len(full_text)
@@ -279,5 +346,6 @@ def _build_result(title: str, lead: str, body: str, *, warnings: list[str] | Non
         word_count=word_count,
         char_count=char_count,
         has_lead_paragraph=bool(lead),
+        subheading_indices=list(subheading_indices or []),
         warnings=list(warnings or []),
     )

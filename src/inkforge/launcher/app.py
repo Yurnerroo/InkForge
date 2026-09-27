@@ -26,6 +26,7 @@ from ..layout_engine.planner import build_layout_plan
 from ..layout_engine.planwriter import write_layout_plan
 from ..layout_engine.profile import ProfileError, resolve_profile
 from . import indesign_bridge
+from .font_provisioner import provision_missing_fonts
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_PROFILES_DIR = REPO_ROOT / "profiles"
@@ -43,6 +44,11 @@ class ExecuteRequest(IssueRequest):
     indd_path: str
     issue_date: str | None = None
     issue_number: str | None = None
+    # Необов'язкова центральна папка користувача з файлами шрифтів (.ttf/
+    # .otf) -- якщо задана, перед запуском верстки потрібні шрифти
+    # копіюються в "Document Fonts" поруч із indd_path, щоб InDesign
+    # підхопив їх без підміни (див. font_provisioner.py).
+    fonts_folder: str | None = None
 
 
 class ExportPdfRequest(IssueRequest):
@@ -58,6 +64,69 @@ def list_profile_ids(profiles_dir: Path) -> list[str]:
     if not profiles_dir.is_dir():
         return []
     return sorted(path.stem for path in profiles_dir.glob("*.yaml"))
+
+
+def _show_folder_dialog(title: str) -> str | None:
+    """Показує нативний діалог вибору папки (блокуючий) і повертає обраний
+    шлях, або ``None``, якщо користувач скасував. Браузер не може віддати
+    реальний абсолютний шлях файлової системи (лише fake-шлях з
+    <input type="file">), тому вибір робить сам Python-бекенд через
+    tkinter.filedialog — окрема функція, щоб тести могли підмінити її без
+    реального GUI."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError:
+        return None
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    try:
+        path = filedialog.askdirectory(title=title)
+    finally:
+        root.destroy()
+    return path or None
+
+
+def _show_open_file_dialog(title: str, filetypes: list[tuple[str, str]]) -> str | None:
+    """Те саме, що ``_show_folder_dialog``, але для вибору наявного файлу."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError:
+        return None
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    try:
+        path = filedialog.askopenfilename(title=title, filetypes=filetypes)
+    finally:
+        root.destroy()
+    return path or None
+
+
+def _show_save_file_dialog(
+    title: str, default_ext: str, filetypes: list[tuple[str, str]]
+) -> str | None:
+    """Те саме, але для вибору шляху збереження (файл може ще не існувати)."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError:
+        return None
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    try:
+        path = filedialog.asksaveasfilename(
+            title=title, defaultextension=default_ext, filetypes=filetypes
+        )
+    finally:
+        root.destroy()
+    return path or None
 
 
 def create_app(
@@ -82,6 +151,31 @@ def create_app(
     @app.get("/api/profiles")
     def profiles() -> dict[str, Any]:
         return {"profiles": list_profile_ids(profiles_dir)}
+
+    @app.get("/api/pick_folder")
+    def pick_folder() -> dict[str, Any]:
+        return {"path": _show_folder_dialog("Виберіть папку тижневого випуску")}
+
+    @app.get("/api/pick_fonts_folder")
+    def pick_fonts_folder() -> dict[str, Any]:
+        return {"path": _show_folder_dialog("Виберіть папку з файлами шрифтів (FONTS)")}
+
+    @app.get("/api/pick_indd")
+    def pick_indd() -> dict[str, Any]:
+        path = _show_open_file_dialog(
+            "Виберіть файл-основу .indd",
+            [("InDesign", "*.indd"), ("Усі файли", "*.*")],
+        )
+        return {"path": path}
+
+    @app.get("/api/pick_pdf_save")
+    def pick_pdf_save() -> dict[str, Any]:
+        path = _show_save_file_dialog(
+            "Куди зберегти друк-PDF",
+            ".pdf",
+            [("PDF", "*.pdf"), ("Усі файли", "*.*")],
+        )
+        return {"path": path}
 
     @app.post("/api/check")
     def check(req: IssueRequest) -> dict[str, Any]:
@@ -141,6 +235,16 @@ def create_app(
                 400, "layout_plan.json не знайдено — спочатку запусти /api/plan."
             )
 
+        fonts_provisioned: dict[str, list[str]] | None = None
+        if req.fonts_folder:
+            plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
+            font_names = list(plan_data.get("fonts_installed") or []) + list(
+                plan_data.get("fonts_substituted") or []
+            )
+            fonts_provisioned = provision_missing_fonts(
+                font_names, Path(req.fonts_folder), Path(req.indd_path)
+            )
+
         try:
             output = indesign_bridge.run_layout_script(
                 indd_path=Path(req.indd_path),
@@ -152,7 +256,10 @@ def create_app(
         except indesign_bridge.IndesignBridgeError as exc:
             raise HTTPException(502, str(exc)) from exc
 
-        return {"output": output}
+        result: dict[str, Any] = {"output": output}
+        if fonts_provisioned is not None:
+            result["fonts_provisioned"] = fonts_provisioned
+        return result
 
     @app.post("/api/export_pdf")
     def export_pdf(req: ExportPdfRequest) -> dict[str, Any]:

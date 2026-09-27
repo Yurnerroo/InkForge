@@ -39,6 +39,10 @@ class ArticleContent:
     word_count: int = 0
     char_count: int = 0
     has_lead_paragraph: bool = False
+    subheading_indices: list[int] = field(default_factory=list)
+    """0-based indices into ``body`` (split on ``\\n``) of paragraphs that
+    should be rendered with the subheadline paragraph style -- see
+    docs/content-structure.md."""
     warnings: list[str] = field(default_factory=list)
 
     @property

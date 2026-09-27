@@ -12,6 +12,9 @@
   .step { display: flex; align-items: center; gap: 0.8rem; margin-top: 0.8rem; }
   button { padding: 0.5rem 1rem; cursor: pointer; }
   button:disabled { cursor: not-allowed; opacity: 0.5; }
+  .path-row { display: flex; gap: 0.4rem; margin-top: 0.2rem; }
+  .path-row input { margin-top: 0; }
+  .path-row button { padding: 0.4rem 0.8rem; white-space: nowrap; }
   .status { font-size: 0.9rem; }
   .status.ok { color: #16794a; }
   .status.err { color: #b3261e; white-space: pre-wrap; }
@@ -28,19 +31,38 @@
     <select id="profile"></select>
 
     <label for="issueFolder">Папка тижневого випуску</label>
-    <input id="issueFolder" type="text" placeholder="C:\...\2026-W40_gazeta-x" />
+    <div class="path-row">
+      <input id="issueFolder" type="text" placeholder="C:\...\2026-W40_gazeta-x" />
+      <button type="button" id="btnBrowseFolder">Огляд папки…</button>
+    </div>
 
     <label for="inddPath">Файл-основа .indd цього випуску</label>
-    <input id="inddPath" type="text" placeholder="C:\...\2026-W40_gazeta-x\gazeta-x.indd" />
+    <div class="path-row">
+      <input id="inddPath" type="text" placeholder="C:\...\2026-W40_gazeta-x\gazeta-x.indd" />
+      <button type="button" id="btnBrowseIndd">Огляд файлу…</button>
+    </div>
 
     <label for="issueDate">Дата випуску (необов'язково)</label>
-    <input id="issueDate" type="text" placeholder="2026-10-01" />
+    <input id="issueDate" type="date" />
 
     <label for="issueNumber">Номер випуску (необов'язково)</label>
     <input id="issueNumber" type="text" placeholder="40" />
 
+    <label for="fontsFolder">Папка з шрифтами FONTS (необов'язково)</label>
+    <div class="path-row">
+      <input id="fontsFolder" type="text" placeholder="C:\...\FONTS" />
+      <button type="button" id="btnBrowseFonts">Огляд папки…</button>
+    </div>
+    <p style="font-size: 0.8rem; color: #555; margin-top: 0.3rem;">
+      Перед кроком 3 потрібні шрифти копіюються з цієї папки в "Document Fonts"
+      поруч із .indd-файлом, щоб InDesign не підміняв відсутні шрифти на схожі.
+    </p>
+
     <label for="pdfPath">Куди зберегти друк-PDF (для кроку 4)</label>
-    <input id="pdfPath" type="text" placeholder="C:\...\2026-W40_gazeta-x\gazeta-x.pdf" />
+    <div class="path-row">
+      <input id="pdfPath" type="text" placeholder="C:\...\2026-W40_gazeta-x\gazeta-x.pdf" />
+      <button type="button" id="btnBrowsePdf">Огляд…</button>
+    </div>
 
     <label for="presetName">Пресет PDF-експорту (необов'язково)</label>
     <input id="presetName" type="text" placeholder="[PDF/X-1a:2001]" />
@@ -139,6 +161,7 @@ document.getElementById("btnExecute").addEventListener("click", async () => {
   const inddPath = document.getElementById("inddPath").value;
   const issueDate = document.getElementById("issueDate").value || null;
   const issueNumber = document.getElementById("issueNumber").value || null;
+  const fontsFolder = document.getElementById("fontsFolder").value || null;
   try {
     const data = await postJson("/api/execute", {
       issue_folder: issueFolder,
@@ -146,8 +169,14 @@ document.getElementById("btnExecute").addEventListener("click", async () => {
       indd_path: inddPath,
       issue_date: issueDate,
       issue_number: issueNumber,
+      fonts_folder: fontsFolder,
     });
-    setStatus("statusExecute", true, "OK — див. вивід нижче");
+    let statusText = "OK — див. вивід нижче";
+    if (data.fonts_provisioned) {
+      const { copied, not_found } = data.fonts_provisioned;
+      statusText += ` (шрифти: скопійовано ${copied.length}, не знайдено ${not_found.length})`;
+    }
+    setStatus("statusExecute", true, statusText);
     showOutput(data);
     document.getElementById("btnExportPdf").disabled = false;
   } catch (e) {
@@ -175,6 +204,35 @@ document.getElementById("btnExportPdf").addEventListener("click", async () => {
     setStatus("statusExportPdf", false, e.message);
   }
 });
+
+async function pickPath(url, inputId, btnId) {
+  const btn = document.getElementById(btnId);
+  btn.disabled = true;
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.path) {
+      document.getElementById(inputId).value = data.path;
+    }
+  } catch (e) {
+    alert("Не вдалося відкрити діалог вибору: " + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById("btnBrowseFolder").addEventListener("click", () =>
+  pickPath("/api/pick_folder", "issueFolder", "btnBrowseFolder")
+);
+document.getElementById("btnBrowseIndd").addEventListener("click", () =>
+  pickPath("/api/pick_indd", "inddPath", "btnBrowseIndd")
+);
+document.getElementById("btnBrowsePdf").addEventListener("click", () =>
+  pickPath("/api/pick_pdf_save", "pdfPath", "btnBrowsePdf")
+);
+document.getElementById("btnBrowseFonts").addEventListener("click", () =>
+  pickPath("/api/pick_fonts_folder", "fontsFolder", "btnBrowseFonts")
+);
 
 loadProfiles();
 </script>

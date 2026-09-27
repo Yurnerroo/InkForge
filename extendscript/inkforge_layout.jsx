@@ -409,6 +409,59 @@ function findMemberByRole(cluster, role) {
 }
 
 /**
+ * Повертає першу назву стилю для заданої ролі з profiles/*.yaml
+ * `paragraph_style_roles` (значення може бути рядком або масивом назв) --
+ * або null, якщо роль не задана чи мапа відсутня.
+ */
+function firstStyleNameForRole(paragraphStyleRoles, role) {
+    if (!paragraphStyleRoles || typeof paragraphStyleRoles !== "object") {
+        return null;
+    }
+    var value = paragraphStyleRoles[role];
+    if (!value) {
+        return null;
+    }
+    return (value instanceof Array) ? (value.length > 0 ? value[0] : null) : value;
+}
+
+/**
+ * Застосовує стиль абзацу-підзаголовка (paragraph_style_roles.subheadline
+ * з profiles/*.yaml) до вказаних абзаців історії фрейму за їхніми 0-based
+ * індексами (мають відповідати позиціям абзаців "\n"-розділеного body
+ * після вставки через setFrameText -- порядок гарантовано збігається, бо
+ * setFrameText лише міняє "\n" на "\r", не змінюючи кількість/порядок
+ * абзаців). Мовчки нічого не робить, якщо indices порожній, стиль не
+ * задано, або сам стиль не знайдено в документі (профіль газети без ролі
+ * "subheadline" -- не помилка, просто фіча не застосовується).
+ */
+function applySubheadingStyles(item, indices, subheadStyleName) {
+    if (!indices || indices.length === 0 || !subheadStyleName) {
+        return;
+    }
+    var style;
+    try {
+        var doc = item.parentStory.parent;
+        style = doc.paragraphStyles.itemByName(subheadStyleName);
+        if (!style.isValid) {
+            return;
+        }
+    } catch (e) {
+        return;
+    }
+    var paragraphs = item.parentStory.paragraphs;
+    for (var i = 0; i < indices.length; i++) {
+        var idx = indices[i];
+        try {
+            if (idx >= 0 && idx < paragraphs.length) {
+                paragraphs.item(idx).appliedParagraphStyle = style;
+            }
+        } catch (e) {
+            // Best effort -- one bad index shouldn't block the rest of layout.
+        }
+    }
+}
+
+/**
  * Вставляє текст у фрейм замість поточного вмісту story. Абзаци у "text"
  * розділені "\n" (формат Рівня 1) -- перед вставкою заміняються на "\r"
  * (розрив абзацу в InDesign). Якщо "text" порожній -- нічого не робить і
@@ -611,8 +664,10 @@ function applyPage1PhotoSlot(page, hexId, article, pageNumber) {
 /**
  * Вставляє текст у фіксований (за hex ID з page1_layout) фрейм сторінки 1
  * і намагається підтиснути overset так само, як applyArticlesToPage.
+ * "subheadingIndices"/"subheadStyleName" опціональні -- передаються лише
+ * для тіла статті (заголовок підзаголовків не має).
  */
-function applyPage1TextSlot(page, hexId, text, minScale, pageNumber, label) {
+function applyPage1TextSlot(page, hexId, text, minScale, pageNumber, label, subheadingIndices, subheadStyleName) {
     var numericId = parseInt(hexId, 16);
     if (isNaN(numericId)) {
         $.writeln(
@@ -630,6 +685,7 @@ function applyPage1TextSlot(page, hexId, text, minScale, pageNumber, label) {
         return;
     }
     if (setFrameText(frame, text)) {
+        applySubheadingStyles(frame, subheadingIndices, subheadStyleName);
         if (!fitFrameText(frame, minScale)) {
             $.writeln(
                 "[Рівень 2, стор." + pageNumber + "] page1_layout: " + label + " не поміщається " +
@@ -677,6 +733,7 @@ function applyMifPage1Special(page, pagePlan, plan) {
         return;
     }
     var minScale = plan.min_horizontal_scale || 97;
+    var subheadStyleName = firstStyleNameForRole(plan.paragraph_style_roles, "subheadline");
 
     var mainArticle = findArticleByRole(pagePlan.articles, "main");
     if (mainArticle) {
@@ -687,7 +744,7 @@ function applyMifPage1Special(page, pagePlan, plan) {
         );
         applyPage1TextSlot(
             page, layout.main_body_frame_id, mainArticle.body, minScale, pagePlan.page,
-            "тіло головної статті"
+            "тіло головної статті", mainArticle.subheading_indices, subheadStyleName
         );
     } else {
         $.writeln(
@@ -747,6 +804,7 @@ function applyArticlesToPage(page, pagePlan, plan) {
 
     var styleToRole = hasStyleRoles ? buildStyleToRoleMap(plan.paragraph_style_roles) : {};
     var sizeRoles = hasSizeRoles ? plan.character_size_roles : null;
+    var subheadStyleName = hasStyleRoles ? firstStyleNameForRole(plan.paragraph_style_roles, "subheadline") : null;
     var clusters = findArticleClusters(page, styleToRole, sizeRoles);
 
     if (clusters.length !== pagePlan.articles.length) {
@@ -828,6 +886,7 @@ function applyArticlesToPage(page, pagePlan, plan) {
                 if (!fitFrameText(bodyMember.item, minScale)) {
                     overset.push("тіло");
                 }
+                applySubheadingStyles(bodyMember.item, article.subheading_indices, subheadStyleName);
             } else {
                 skipped.push("тіло");
             }
@@ -856,7 +915,20 @@ function main() {
 
     var fontWarnings = checkFonts(plan);
     if (fontWarnings.length > 0) {
-        alert("Попередження про шрифти:\n\n" + fontWarnings.join("\n"));
+        var proceed = confirm(
+            "Попередження про шрифти:\n\n" + fontWarnings.join("\n") +
+            "\n\nInDesign автоматично підмінить відсутні шрифти на схожі -- " +
+            "текст переверстається, але видима гарнітура буде іншою (наприклад, " +
+            "замість очікуваного шрифту з'явиться щось на кшталт \"Everest-Demi\").\n\n" +
+            "Щоб виправити: покладіть файли цих шрифтів у папку \"Document Fonts\" " +
+            "поруч із .indd-файлом цього випуску (InDesign підхопить їх автоматично, " +
+            "без встановлення в систему), і запустіть скрипт знову.\n\n" +
+            "Продовжити верстку попри це (OK) чи скасувати (Cancel)?",
+            true
+        );
+        if (!proceed) {
+            throw new Error("Скасовано користувачем через відсутні шрифти.");
+        }
     }
 
     var meta = promptForIssueMeta();
