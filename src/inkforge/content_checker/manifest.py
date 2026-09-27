@@ -55,6 +55,7 @@ def _article_to_dict(article: ArticleContent) -> dict[str, Any]:
         "word_count": article.word_count,
         "char_count": article.char_count,
         "has_lead_paragraph": article.has_lead_paragraph,
+        "subheading_indices": list(article.subheading_indices),
         "warnings": list(article.warnings),
     }
 

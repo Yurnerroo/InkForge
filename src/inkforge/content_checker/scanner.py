@@ -152,6 +152,7 @@ def _scan_page_folder(folder: Path) -> PageContent:
                 word_count=text.word_count,
                 char_count=text.char_count,
                 has_lead_paragraph=text.has_lead_paragraph,
+                subheading_indices=list(text.subheading_indices),
             )
             article.warnings.extend(base_warnings)
             article.warnings.extend(text.warnings)
