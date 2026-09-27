@@ -41,6 +41,9 @@ def _make_issue(tmp_path: Path) -> Path:
     page_dir = issue_dir / "01"
     page_dir.mkdir(parents=True)
     (page_dir / "1_1_article.txt").write_text("Текст статті для перевірки.", encoding="utf-8")
+    fonts_dir = issue_dir / "FONTS"
+    fonts_dir.mkdir()
+    (fonts_dir / "Arial.ttf").write_bytes(b"fake-ttf")
     return issue_dir
 
 
@@ -224,30 +227,19 @@ def test_pick_pdf_save_returns_dialog_result(tmp_path: Path, monkeypatch: pytest
     assert response.json() == {"path": r"C:\chosen\out.pdf"}
 
 
-def test_pick_fonts_folder_returns_dialog_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _make_client(tmp_path)
-    monkeypatch.setattr(app_module, "_show_folder_dialog", lambda title: r"C:\chosen\FONTS")
-
-    response = client.get("/api/pick_fonts_folder")
-
-    assert response.status_code == 200
-    assert response.json() == {"path": r"C:\chosen\FONTS"}
-
-
 def test_execute_with_fonts_folder_provisions_fonts_before_failing(tmp_path: Path) -> None:
     """No real InDesign is available in tests (still a 502, same as
     test_execute_after_plan_fails_gracefully_without_indesign), but font
     provisioning runs before the InDesign call and must still leave the
-    matching font file copied into "Document Fonts" next to the .indd."""
+    matching font file copied into "Document Fonts" next to the .indd. The
+    FONTS folder itself is the required `issue_dir/FONTS` subfolder from
+    _make_issue -- no separate fonts_folder argument exists anymore."""
 
     client = _make_client(tmp_path)
     issue_dir = _make_issue(tmp_path)
     client.post("/api/check", json={"issue_folder": str(issue_dir), "profile": "test_gazeta"})
     client.post("/api/plan", json={"issue_folder": str(issue_dir), "profile": "test_gazeta"})
 
-    fonts_dir = tmp_path / "FONTS"
-    fonts_dir.mkdir()
-    (fonts_dir / "Arial.ttf").write_bytes(b"fake-ttf")
     indd_path = issue_dir / "gazeta.indd"
     indd_path.write_bytes(b"fake-indd")
 
@@ -257,13 +249,36 @@ def test_execute_with_fonts_folder_provisions_fonts_before_failing(tmp_path: Pat
             "issue_folder": str(issue_dir),
             "profile": "test_gazeta",
             "indd_path": str(indd_path),
-            "fonts_folder": str(fonts_dir),
         },
     )
 
     assert response.status_code == 502
     copied_file = issue_dir / "Document Fonts" / "Arial.ttf"
     assert copied_file.is_file()
+
+
+def test_execute_without_fonts_folder_returns_400(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+    issue_dir = _make_issue(tmp_path)
+    client.post("/api/check", json={"issue_folder": str(issue_dir), "profile": "test_gazeta"})
+    client.post("/api/plan", json={"issue_folder": str(issue_dir), "profile": "test_gazeta"})
+    import shutil
+
+    shutil.rmtree(issue_dir / "FONTS")
+    indd_path = issue_dir / "gazeta.indd"
+    indd_path.write_bytes(b"fake-indd")
+
+    response = client.post(
+        "/api/execute",
+        json={
+            "issue_folder": str(issue_dir),
+            "profile": "test_gazeta",
+            "indd_path": str(indd_path),
+        },
+    )
+
+    assert response.status_code == 400
+    assert "FONTS" in response.json()["detail"]
 
 
 def test_export_pdf_after_plan_fails_gracefully_without_indesign(tmp_path: Path) -> None:
@@ -285,3 +300,95 @@ def test_export_pdf_after_plan_fails_gracefully_without_indesign(tmp_path: Path)
     )
 
     assert response.status_code == 502
+
+
+def test_export_pdf_auto_names_when_pdf_path_omitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = _make_client(tmp_path)
+    issue_dir = _make_issue(tmp_path)
+    client.post("/api/check", json={"issue_folder": str(issue_dir), "profile": "test_gazeta"})
+    client.post("/api/plan", json={"issue_folder": str(issue_dir), "profile": "test_gazeta"})
+
+    monkeypatch.setattr(
+        app_module.indesign_bridge, "run_export_pdf_script", lambda **kwargs: "ok"
+    )
+
+    response = client.post(
+        "/api/export_pdf",
+        json={
+            "issue_folder": str(issue_dir),
+            "profile": "test_gazeta",
+            "issue_number": "10",
+            "total_publishes": "125",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    expected = issue_dir / "export_results" / "TEST_GAZETA_10(125)_1.pdf"
+    assert Path(data["pdf_path"]) == expected
+    assert expected.parent.is_dir()
+
+
+def test_export_pdf_without_path_or_numbers_returns_400(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+    issue_dir = _make_issue(tmp_path)
+    client.post("/api/check", json={"issue_folder": str(issue_dir), "profile": "test_gazeta"})
+    client.post("/api/plan", json={"issue_folder": str(issue_dir), "profile": "test_gazeta"})
+
+    response = client.post(
+        "/api/export_pdf",
+        json={"issue_folder": str(issue_dir), "profile": "test_gazeta"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_validate_structure_valid_issue(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+    issue_dir = _make_issue(tmp_path)
+
+    response = client.post(
+        "/api/validate_structure",
+        json={"issue_folder": str(issue_dir), "profile": "test_gazeta"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["valid"] is True
+    assert data["pages_found"] == ["01"]
+    assert data["errors"] == []
+
+
+def test_validate_structure_missing_fonts_folder(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+    issue_dir = _make_issue(tmp_path)
+    import shutil
+
+    shutil.rmtree(issue_dir / "FONTS")
+
+    response = client.post(
+        "/api/validate_structure",
+        json={"issue_folder": str(issue_dir), "profile": "test_gazeta"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["valid"] is False
+    assert any("FONTS" in e for e in data["errors"])
+
+
+def test_check_blocks_when_fonts_folder_missing(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+    issue_dir = _make_issue(tmp_path)
+    import shutil
+
+    shutil.rmtree(issue_dir / "FONTS")
+
+    response = client.post(
+        "/api/check", json={"issue_folder": str(issue_dir), "profile": "test_gazeta"}
+    )
+
+    assert response.status_code == 400
+    assert "FONTS" in response.json()["detail"]

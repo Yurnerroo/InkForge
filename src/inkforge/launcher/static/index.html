@@ -37,6 +37,12 @@
       <input id="issueFolder" type="text" placeholder="C:\...\2026-W40_gazeta-x" />
       <button type="button" id="btnBrowseFolder">Огляд папки…</button>
     </div>
+    <p style="font-size: 0.8rem; color: #555; margin-top: 0.3rem;">
+      Усередині папки випуску обов'язково має бути підпапка <code>FONTS</code>
+      із файлами шрифтів (.ttf/.otf/.ttc) цього випуску — інакше кроки нижче
+      будуть заблоковані.
+    </p>
+    <div id="structureStatus" class="status"></div>
 
     <label for="inddPath">Файл-основа .indd цього випуску</label>
     <div class="path-row">
@@ -50,21 +56,20 @@
     <label for="issueNumber">Номер випуску (необов'язково)</label>
     <input id="issueNumber" type="text" placeholder="40" />
 
-    <label for="fontsFolder">Папка з шрифтами FONTS (необов'язково)</label>
-    <div class="path-row">
-      <input id="fontsFolder" type="text" placeholder="C:\...\FONTS" />
-      <button type="button" id="btnBrowseFonts">Огляд папки…</button>
-    </div>
-    <p style="font-size: 0.8rem; color: #555; margin-top: 0.3rem;">
-      Перед кроком 3 потрібні шрифти копіюються з цієї папки в "Document Fonts"
-      поруч із .indd-файлом, щоб InDesign не підміняв відсутні шрифти на схожі.
-    </p>
+    <label for="totalPublishes">Наскрізний номер випуску (необов'язково, для назви PDF)</label>
+    <input id="totalPublishes" type="text" placeholder="125" />
 
-    <label for="pdfPath">Куди зберегти друк-PDF (для кроку 4)</label>
+    <label for="pdfPath">Куди зберегти друк-PDF (необов'язково для кроку 4)</label>
     <div class="path-row">
-      <input id="pdfPath" type="text" placeholder="C:\...\2026-W40_gazeta-x\gazeta-x.pdf" />
+      <input id="pdfPath" type="text" placeholder="залиш порожнім — обчислиться автоматично" />
       <button type="button" id="btnBrowsePdf">Огляд…</button>
     </div>
+    <p style="font-size: 0.8rem; color: #555; margin-top: 0.3rem;">
+      Якщо не вказано, PDF зберігається автоматично у підпапці
+      <code>export_results</code> папки випуску за назвою
+      <code>{газета}_{номер}(наскрізний)_{n}.pdf</code> (номер випуску +
+      наскрізний номер вище обов'язкові для автоімені).
+    </p>
 
     <label for="presetName">Пресет PDF-експорту (необов'язково)</label>
     <input id="presetName" type="text" placeholder="[PDF/X-1a:2001]" />
@@ -117,6 +122,46 @@ function showOutput(data) {
   const pre = document.getElementById("output");
   pre.hidden = false;
   pre.textContent = JSON.stringify(data, null, 2);
+}
+
+let structureValid = false;
+
+function updateStepButtons() {
+  document.getElementById("btnCheck").disabled = !structureValid;
+}
+
+async function validateStructure() {
+  const issueFolder = document.getElementById("issueFolder").value;
+  const profile = document.getElementById("profile").value;
+  const el = document.getElementById("structureStatus");
+  if (!issueFolder) {
+    structureValid = false;
+    el.textContent = "";
+    el.className = "status";
+    updateStepButtons();
+    return;
+  }
+  try {
+    const res = await fetch("/api/validate_structure", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ issue_folder: issueFolder, profile: profile || null }),
+    });
+    const data = await res.json();
+    structureValid = data.valid;
+    const parts = [];
+    if (data.errors && data.errors.length) parts.push("Помилки:\n" + data.errors.join("\n"));
+    if (data.warnings && data.warnings.length) parts.push("Попередження:\n" + data.warnings.join("\n"));
+    el.textContent = data.valid
+      ? `OK — знайдено ${data.pages_found.length} стор.` + (parts.length ? "\n" + parts.join("\n") : "")
+      : parts.join("\n") || "Структуру не пройдено.";
+    el.className = "status " + (data.valid ? "ok" : "err");
+  } catch (e) {
+    structureValid = false;
+    el.textContent = "Не вдалося перевірити структуру: " + e.message;
+    el.className = "status err";
+  }
+  updateStepButtons();
 }
 
 function showExecuteLog(text) {
@@ -183,7 +228,6 @@ document.getElementById("btnExecute").addEventListener("click", async () => {
   const inddPath = document.getElementById("inddPath").value;
   const issueDate = document.getElementById("issueDate").value || null;
   const issueNumber = document.getElementById("issueNumber").value || null;
-  const fontsFolder = document.getElementById("fontsFolder").value || null;
   try {
     const data = await postJson("/api/execute", {
       issue_folder: issueFolder,
@@ -191,7 +235,6 @@ document.getElementById("btnExecute").addEventListener("click", async () => {
       indd_path: inddPath,
       issue_date: issueDate,
       issue_number: issueNumber,
-      fonts_folder: fontsFolder,
     });
     let statusText = "OK — див. вивід нижче";
     if (data.fonts_provisioned) {
@@ -211,8 +254,10 @@ document.getElementById("btnExportPdf").addEventListener("click", async () => {
   const issueFolder = document.getElementById("issueFolder").value;
   const profile = document.getElementById("profile").value;
   const inddPath = document.getElementById("inddPath").value || null;
-  const pdfPath = document.getElementById("pdfPath").value;
+  const pdfPath = document.getElementById("pdfPath").value || null;
   const presetName = document.getElementById("presetName").value || null;
+  const issueNumber = document.getElementById("issueNumber").value || null;
+  const totalPublishes = document.getElementById("totalPublishes").value || null;
   try {
     const data = await postJson("/api/export_pdf", {
       issue_folder: issueFolder,
@@ -220,6 +265,8 @@ document.getElementById("btnExportPdf").addEventListener("click", async () => {
       indd_path: inddPath,
       pdf_path: pdfPath,
       preset_name: presetName,
+      issue_number: issueNumber,
+      total_publishes: totalPublishes,
     });
     setStatus("statusExportPdf", true, `OK — збережено ${data.pdf_path}`);
     showOutput(data);
@@ -228,7 +275,7 @@ document.getElementById("btnExportPdf").addEventListener("click", async () => {
   }
 });
 
-async function pickPath(url, inputId, btnId) {
+async function pickPath(url, inputId, btnId, onSet) {
   const btn = document.getElementById(btnId);
   btn.disabled = true;
   try {
@@ -236,6 +283,7 @@ async function pickPath(url, inputId, btnId) {
     const data = await res.json();
     if (data.path) {
       document.getElementById(inputId).value = data.path;
+      if (onSet) onSet();
     }
   } catch (e) {
     alert("Не вдалося відкрити діалог вибору: " + e.message);
@@ -245,7 +293,7 @@ async function pickPath(url, inputId, btnId) {
 }
 
 document.getElementById("btnBrowseFolder").addEventListener("click", () =>
-  pickPath("/api/pick_folder", "issueFolder", "btnBrowseFolder")
+  pickPath("/api/pick_folder", "issueFolder", "btnBrowseFolder", validateStructure)
 );
 document.getElementById("btnBrowseIndd").addEventListener("click", () =>
   pickPath("/api/pick_indd", "inddPath", "btnBrowseIndd")
@@ -253,10 +301,12 @@ document.getElementById("btnBrowseIndd").addEventListener("click", () =>
 document.getElementById("btnBrowsePdf").addEventListener("click", () =>
   pickPath("/api/pick_pdf_save", "pdfPath", "btnBrowsePdf")
 );
-document.getElementById("btnBrowseFonts").addEventListener("click", () =>
-  pickPath("/api/pick_fonts_folder", "fontsFolder", "btnBrowseFonts")
-);
 
+document.getElementById("issueFolder").addEventListener("change", validateStructure);
+document.getElementById("issueFolder").addEventListener("blur", validateStructure);
+document.getElementById("profile").addEventListener("change", validateStructure);
+
+updateStepButtons();
 loadProfiles();
 </script>
 </body>

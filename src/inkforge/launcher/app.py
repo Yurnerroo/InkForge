@@ -21,12 +21,14 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from ..content_checker.manifest import build_manifest, write_manifest
-from ..content_checker.scanner import scan_issue
+from ..content_checker.scanner import FONTS_FOLDER_NAME, is_fonts_folder_name, scan_issue
+from ..content_checker.structure_validator import validate_issue_structure
 from ..layout_engine.planner import build_layout_plan
 from ..layout_engine.planwriter import write_layout_plan
 from ..layout_engine.profile import ProfileError, resolve_profile
 from . import indesign_bridge
 from .font_provisioner import provision_missing_fonts
+from .pdf_naming import next_export_pdf_path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_PROFILES_DIR = REPO_ROOT / "profiles"
@@ -40,30 +42,52 @@ class IssueRequest(BaseModel):
     profile: str
 
 
+class ValidateStructureRequest(BaseModel):
+    issue_folder: str
+    # Необов'язковий -- якщо профіль ще не обрано або невідомий, перевірка
+    # просто не зможе звільнити від вимоги контенту "ручні" сторінки
+    # профілю, решта перевірок (FONTS, сторінкові підпапки) не залежать
+    # від профілю взагалі.
+    profile: str | None = None
+
+
 class ExecuteRequest(IssueRequest):
     indd_path: str
     issue_date: str | None = None
     issue_number: str | None = None
-    # Необов'язкова центральна папка користувача з файлами шрифтів (.ttf/
-    # .otf) -- якщо задана, перед запуском верстки потрібні шрифти
-    # копіюються в "Document Fonts" поруч із indd_path, щоб InDesign
-    # підхопив їх без підміни (див. font_provisioner.py).
-    fonts_folder: str | None = None
 
 
 class ExportPdfRequest(IssueRequest):
-    pdf_path: str
+    # Необов'язковий -- якщо не задано, шлях обчислюється автоматично за
+    # конвенцією найменування у виділеній підпапці issue_folder/export_results
+    # (див. pdf_naming.py); вимагає issue_number і total_publishes.
+    pdf_path: str | None = None
     # Fallback, лише якщо в InDesign немає вже відкритого документа (див.
     # inkforge_export_pdf.jsx, getTargetDocument). Типово доправлений
     # документ уже відкритий після кроків 3-4, тому не обов'язково.
     indd_path: str | None = None
     preset_name: str | None = None
+    # Для авто-імені PDF за конвенцією "{тип}_{номер}({наскрізний})_{n}.pdf":
+    issue_number: str | None = None
+    total_publishes: str | None = None
 
 
 def list_profile_ids(profiles_dir: Path) -> list[str]:
     if not profiles_dir.is_dir():
         return []
     return sorted(path.stem for path in profiles_dir.glob("*.yaml"))
+
+
+def _find_fonts_folder(issue_path: Path) -> Path | None:
+    """Знаходить обов'язкову підпапку шрифтів усередині ``issue_path``
+    (регістронезалежно), або ``None``, якщо її немає."""
+
+    if not issue_path.is_dir():
+        return None
+    for child in issue_path.iterdir():
+        if child.is_dir() and is_fonts_folder_name(child.name):
+            return child
+    return None
 
 
 def _show_folder_dialog(title: str) -> str | None:
@@ -156,10 +180,6 @@ def create_app(
     def pick_folder() -> dict[str, Any]:
         return {"path": _show_folder_dialog("Виберіть папку тижневого випуску")}
 
-    @app.get("/api/pick_fonts_folder")
-    def pick_fonts_folder() -> dict[str, Any]:
-        return {"path": _show_folder_dialog("Виберіть папку з файлами шрифтів (FONTS)")}
-
     @app.get("/api/pick_indd")
     def pick_indd() -> dict[str, Any]:
         path = _show_open_file_dialog(
@@ -177,11 +197,39 @@ def create_app(
         )
         return {"path": path}
 
+    @app.post("/api/validate_structure")
+    def validate_structure(req: ValidateStructureRequest) -> dict[str, Any]:
+        issue_path = Path(req.issue_folder)
+        profile = None
+        if req.profile:
+            try:
+                profile = resolve_profile(req.profile, profiles_dir)
+            except ProfileError:
+                profile = None  # профіль ще не обрано/невідомий -- не блокуємо перевірку структури через це
+
+        result = validate_issue_structure(issue_path, profile)
+        return {
+            "valid": result.valid,
+            "errors": result.errors,
+            "warnings": result.warnings,
+            "pages_found": result.pages_found,
+            "fonts_folder": result.fonts_folder,
+        }
+
     @app.post("/api/check")
     def check(req: IssueRequest) -> dict[str, Any]:
         issue_path = Path(req.issue_folder)
         if not issue_path.is_dir():
             raise HTTPException(400, f"Папку випуску не знайдено: {issue_path}")
+
+        try:
+            profile = resolve_profile(req.profile, profiles_dir)
+        except ProfileError:
+            profile = None  # див. коментар у validate_structure() вище
+
+        structure = validate_issue_structure(issue_path, profile)
+        if not structure.valid:
+            raise HTTPException(400, "; ".join(structure.errors))
 
         issue = scan_issue(issue_path, newspaper=req.profile)
         manifest = build_manifest(issue)
@@ -235,15 +283,23 @@ def create_app(
                 400, "layout_plan.json не знайдено — спочатку запусти /api/plan."
             )
 
-        fonts_provisioned: dict[str, list[str]] | None = None
-        if req.fonts_folder:
-            plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
-            font_names = list(plan_data.get("fonts_installed") or []) + list(
-                plan_data.get("fonts_substituted") or []
+        fonts_dir = _find_fonts_folder(issue_path)
+        if fonts_dir is None:
+            raise HTTPException(
+                400,
+                "Не знайдено папку зі шрифтами. Створіть підпапку "
+                f"'{FONTS_FOLDER_NAME}' безпосередньо всередині папки випуску "
+                f"(тобто {issue_path / FONTS_FOLDER_NAME}) і покладіть туди "
+                "файли шрифтів (.ttf/.otf/.ttc), потрібні для цього випуску.",
             )
-            fonts_provisioned = provision_missing_fonts(
-                font_names, Path(req.fonts_folder), Path(req.indd_path)
-            )
+
+        plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
+        font_names = list(plan_data.get("fonts_installed") or []) + list(
+            plan_data.get("fonts_substituted") or []
+        )
+        fonts_provisioned = provision_missing_fonts(
+            font_names, fonts_dir, Path(req.indd_path)
+        )
 
         try:
             output = indesign_bridge.run_layout_script(
@@ -256,10 +312,7 @@ def create_app(
         except indesign_bridge.IndesignBridgeError as exc:
             raise HTTPException(502, str(exc)) from exc
 
-        result: dict[str, Any] = {"output": output}
-        if fonts_provisioned is not None:
-            result["fonts_provisioned"] = fonts_provisioned
-        return result
+        return {"output": output, "fonts_provisioned": fonts_provisioned}
 
     @app.post("/api/export_pdf")
     def export_pdf(req: ExportPdfRequest) -> dict[str, Any]:
@@ -270,10 +323,26 @@ def create_app(
                 400, "layout_plan.json не знайдено — спочатку запусти /api/plan."
             )
 
+        if req.pdf_path:
+            pdf_path = Path(req.pdf_path)
+        else:
+            if not req.issue_number or not req.total_publishes:
+                raise HTTPException(
+                    400,
+                    "Для автоматичного імені PDF потрібні issue_number "
+                    "(номер випуску) і total_publishes (наскрізний номер) — "
+                    "або вкажи pdf_path вручну.",
+                )
+            plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
+            newspaper_type = str(plan_data.get("newspaper_id") or req.profile).upper()
+            pdf_path = next_export_pdf_path(
+                issue_path, newspaper_type, req.issue_number, req.total_publishes
+            )
+
         try:
             output = indesign_bridge.run_export_pdf_script(
                 plan_path=plan_path,
-                pdf_path=Path(req.pdf_path),
+                pdf_path=pdf_path,
                 script_path=pdf_script_path,
                 indd_path=Path(req.indd_path) if req.indd_path else None,
                 preset_name=req.preset_name,
@@ -281,7 +350,7 @@ def create_app(
         except indesign_bridge.IndesignBridgeError as exc:
             raise HTTPException(502, str(exc)) from exc
 
-        return {"output": output, "pdf_path": req.pdf_path}
+        return {"output": output, "pdf_path": str(pdf_path)}
 
     return app
 

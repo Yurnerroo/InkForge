@@ -29,11 +29,26 @@ from .models import ArticleContent, IssueContent, PageContent
 TEXT_EXTENSIONS = {".docx", ".doc", ".txt"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 
+FONTS_FOLDER_NAME = "FONTS"
+"""Назва обов'язкової підпапки випуску з файлами шрифтів (.ttf/.otf/.ttc) —
+див. docs/content-structure.md. Виключається зі сканування сторінок, щоб
+ніколи не потрапити в manifest.json як фейкова "сторінка" (реальний
+виробничий баг: "Document fonts" з IDML-експорту раніше саме так і
+траплялось, з 0 статей)."""
+
 _STEM_PATTERN = re.compile(r"^(?P<page>\d+)_(?P<order>\d+)_(?P<slug>.+)$")
 
 
+def is_fonts_folder_name(name: str) -> bool:
+    """Регістронезалежна перевірка, чи ``name`` — назва папки шрифтів."""
+
+    return name.strip().lower() == FONTS_FOLDER_NAME.lower()
+
+
 def _iter_page_folders(root: Path) -> list[Path]:
-    folders = [p for p in root.iterdir() if p.is_dir()]
+    folders = [
+        p for p in root.iterdir() if p.is_dir() and not is_fonts_folder_name(p.name)
+    ]
 
     def sort_key(p: Path) -> tuple[int, str]:
         try:
