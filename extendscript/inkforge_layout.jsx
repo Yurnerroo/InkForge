@@ -232,6 +232,29 @@ function describeClusterForLog(cluster) {
 }
 
 /**
+ * Короткий опис БУДЬ-ЯКОГО фрейму сторінки (не лише заголовкового) для
+ * діагностики розбіжності "кластерів != статей" -- показує саме роль і
+ * назву стилю абзаца, розв'язані collectPageFrames, щоб було видно, чому
+ * конкретний фрейм НЕ потрапив у "headline" (стиль не входить у
+ * paragraph_style_roles профілю? стиль зчитався як null? роль інша?).
+ */
+function describeFrameForLog(frame) {
+    var text = "";
+    try {
+        text = frame.item.contents;
+        if (text && text.length > 40) {
+            text = text.substr(0, 40) + "...";
+        }
+    } catch (e) {
+        text = "(не вдалося прочитати текст)";
+    }
+    return "id=" + frame.item.id + ", kind=" + frame.kind + ", role=" +
+        (frame.role === null ? "null" : frame.role) + ", styleName=" +
+        (frame.styleName ? "\"" + frame.styleName + "\"" : "(немає)") +
+        ", bounds=[" + frame.bounds.join(", ") + "], текст=\"" + text + "\"";
+}
+
+/**
  * Перетворює profiles/*.yaml `paragraph_style_roles` (роль -> назва стилю
  * або масив назв) на зворотну мапу "назва стилю -> роль" для швидкого
  * пошуку під час обходу фреймів сторінки.
@@ -332,9 +355,11 @@ function collectPageFrames(page, styleToRole, sizeRoles) {
     for (var i = 0; i < textFrames.length; i++) {
         var tf = textFrames[i];
         var role = null;
+        var styleName = null;
         try {
             if (tf.parentStory.paragraphs.length > 0) {
-                role = styleToRole[tf.parentStory.paragraphs.item(0).appliedParagraphStyle.name] || null;
+                styleName = tf.parentStory.paragraphs.item(0).appliedParagraphStyle.name;
+                role = styleToRole[styleName] || null;
             }
         } catch (e) {
             role = null;
@@ -342,7 +367,12 @@ function collectPageFrames(page, styleToRole, sizeRoles) {
         if (role === null && sizeRoles) {
             role = resolveRoleByCharacterSize(tf, sizeRoles);
         }
-        frames.push({ item: tf, kind: "text", role: role, bounds: itemBounds(tf) });
+        // "styleName" -- лише для діагностики (describeFrameForLog): яка
+        // назва стилю абзацу реально застосована, навіть якщо роль не
+        // розв'язалась -- саме це потрібно, щоб зрозуміти, чому фрейм не
+        // потрапив у кластер заголовків (стиль не в paragraph_style_roles?
+        // порожній фрейм? інша роль?).
+        frames.push({ item: tf, kind: "text", role: role, bounds: itemBounds(tf), styleName: styleName });
     }
 
     var photoCandidates = [].concat(
@@ -865,6 +895,19 @@ function applyArticlesToPage(page, pagePlan, plan) {
             log(
                 "[Рівень 2] Сторінка " + pagePlan.page + ": кластер #" + (ci + 1) + " -- " +
                 describeClusterForLog(clusters[ci])
+            );
+        }
+        // Розбіжність найчастіше означає, що частина фреймів на сторінці
+        // НЕ отримала роль "headline", хоча має бути окремою статтею --
+        // покажемо буквально всі текстові/фото-фрейми сторінки з їхньою
+        // роллю й реальною назвою стилю абзаца, щоб було видно, чи стиль
+        // просто не входить у paragraph_style_roles профілю (типова
+        // причина: секондарний заголовок отримав інший/ручний стиль).
+        var allFrames = collectPageFrames(page, styleToRole, sizeRoles);
+        for (var fi = 0; fi < allFrames.length; fi++) {
+            log(
+                "[Рівень 2] Сторінка " + pagePlan.page + ": фрейм #" + (fi + 1) + " -- " +
+                describeFrameForLog(allFrames[fi])
             );
         }
         SKIPPED_PAGES.push(
