@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from inkforge.content_checker.scanner import scan_issue
+from inkforge.content_checker.scanner import is_fonts_folder_name, scan_issue
 
 
 def test_scan_issue_matches_text_and_photo_by_stem(tmp_path: Path) -> None:
@@ -21,6 +21,34 @@ def test_scan_issue_matches_text_and_photo_by_stem(tmp_path: Path) -> None:
     assert article.text_path is not None
     assert article.image_path is not None
     assert article.word_count == 3
+
+
+def test_scan_issue_excludes_fonts_folder_from_pages(tmp_path: Path) -> None:
+    """FONTS (regardless of case) is a reserved subfolder for font files, not
+    a page -- see docs/content-structure.md. It must never show up as a page
+    in the manifest, otherwise it produces bogus "0 articles" page entries
+    and "Unrecognized file skipped: *.ttf" noise (real production bug seen
+    with a "Document fonts" folder from an IDML export)."""
+
+    page_dir = tmp_path / "01"
+    page_dir.mkdir()
+    (page_dir / "1_1_lider.txt").write_text("Текст.", encoding="utf-8")
+
+    fonts_dir = tmp_path / "FONTS"
+    fonts_dir.mkdir()
+    (fonts_dir / "Arial.ttf").write_bytes(b"fake-ttf")
+
+    issue = scan_issue(tmp_path)
+
+    assert [p.page for p in issue.pages] == ["01"]
+
+
+def test_is_fonts_folder_name_case_insensitive() -> None:
+    assert is_fonts_folder_name("FONTS")
+    assert is_fonts_folder_name("fonts")
+    assert is_fonts_folder_name(" Fonts ")
+    assert not is_fonts_folder_name("Document fonts")
+    assert not is_fonts_folder_name("01")
 
 
 def test_scan_issue_flags_photo_without_text(tmp_path: Path) -> None:
