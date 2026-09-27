@@ -245,6 +245,34 @@ def test_read_docx_multi_does_not_split_on_bold_subheadline_without_blank_gap(
     assert "Абзац тіла статті після підзаголовка." in results[0].body
 
 
+def test_read_docx_multi_does_not_split_on_question_mark_after_blank_gap(
+    tmp_path: Path,
+) -> None:
+    """Regression test for a real production bug: a short dialogue/rhetorical
+    line ending in "?" (a complete sentence, e.g. "– А груші?"), preceded by
+    a blank line, was being misdetected as a new article's title because
+    only a trailing period was recognized as "this is body text" -- now any
+    sentence-ending punctuation (., !, ?, …) must count, so this line stays
+    an interior part of the same article's body."""
+
+    document = Document()
+    document.add_paragraph("Заголовок статті")
+    document.add_paragraph("Частину сусідці віддала, зварила варення.")
+    document.add_paragraph("")
+    document.add_paragraph("– А груші?")
+    document.add_paragraph("Онук любить, щоразу клала йому повні кишені.")
+    path = tmp_path / "article.docx"
+    document.save(str(path))
+
+    results = read_text_metrics_multi(path)
+
+    assert len(results) == 1
+    assert results[0].title == "Заголовок статті"
+    assert "– А груші?" in results[0].body
+    assert "Онук любить, щоразу клала йому повні кишені." in results[0].body
+    assert results[0].subheading_indices == []
+
+
 def test_read_txt_multi_does_not_split_without_blank_gap(tmp_path: Path) -> None:
     path = tmp_path / "article.txt"
     path.write_text(
