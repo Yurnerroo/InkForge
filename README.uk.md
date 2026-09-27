@@ -90,3 +90,12 @@ inkforge-launcher
 ```bash
 pytest
 ```
+
+## Оновлення проєкту (без ручного скачування ZIP)
+
+Для комп'ютера верстальниці є файл
+[`scripts/update_and_run.bat`](scripts/update_and_run.bat): подвійний клік —
+і він робить `git pull` у папці проєкту, підтягуючи останню версію коду з
+GitHub. Папка проєкту вже має бути git-репозиторієм (`git clone` виконано
+один раз заздалегідь), і потрібен встановлений
+[Git for Windows](https://git-scm.com/download/win).

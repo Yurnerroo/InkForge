@@ -113,6 +113,15 @@ inkforge-launcher
 pytest
 ```
 
+## Updating on the layout person's computer
+
+[`scripts/update_and_run.bat`](scripts/update_and_run.bat) is a
+double-click-to-update script for the non-technical end user's Windows
+machine: it runs `git pull` in the project folder to fetch the latest code
+from GitHub. The project folder must already be a git clone (run `git clone`
+once beforehand), and [Git for Windows](https://git-scm.com/download/win)
+must be installed.
+
 ## Documentation
 
 The in-depth docs are written in Ukrainian, the working language of the
