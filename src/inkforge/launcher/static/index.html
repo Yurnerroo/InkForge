@@ -19,6 +19,8 @@
   .status.ok { color: #16794a; }
   .status.err { color: #b3261e; white-space: pre-wrap; }
   pre { background: #f5f5f5; padding: 0.6rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; }
+  #executeLog { background: #1a1a1a; color: #ddd; white-space: pre-wrap; font-size: 0.8rem; max-height: 320px; overflow-y: auto; }
+  #executeLog .skip-line { color: #ff8a80; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -89,6 +91,7 @@
   </div>
 
   <pre id="output" hidden></pre>
+  <pre id="executeLog" hidden></pre>
 
 <script>
 async function loadProfiles() {
@@ -114,6 +117,25 @@ function showOutput(data) {
   const pre = document.getElementById("output");
   pre.hidden = false;
   pre.textContent = JSON.stringify(data, null, 2);
+}
+
+function showExecuteLog(text) {
+  const el = document.getElementById("executeLog");
+  if (!text) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  el.innerHTML = "";
+  const lines = text.split("\n");
+  for (const line of lines) {
+    const div = document.createElement("div");
+    div.textContent = line;
+    if (line.indexOf("пропущено") !== -1 || line.indexOf("УВАГА") !== -1) {
+      div.className = "skip-line";
+    }
+    el.appendChild(div);
+  }
 }
 
 async function postJson(url, body) {
@@ -178,6 +200,7 @@ document.getElementById("btnExecute").addEventListener("click", async () => {
     }
     setStatus("statusExecute", true, statusText);
     showOutput(data);
+    showExecuteLog(data.output);
     document.getElementById("btnExportPdf").disabled = false;
   } catch (e) {
     setStatus("statusExecute", false, e.message);

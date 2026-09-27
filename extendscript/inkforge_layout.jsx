@@ -71,6 +71,25 @@
 // нічого не робить, якщо JSON вже є в середовищі.
 #include "vendor/json2.jsx"
 
+// $.writeln пише лише в ExtendScript-консоль, яку launcher НЕ бачить (COM
+// DoScript не перехоплює цей потік) — тому раніше всі попередження про
+// пропущені сторінки/фрейми "губилися": launcher показував "Готово" навіть
+// якщо всю сторінку 2 чи 3 мовчки пропущено через невідповідність кількості
+// кластерів. RUN_LOG/log() дублює кожне повідомлення і в консоль (для
+// ручного відлагодження в InDesign), і в масив, що main() повертає одним
+// рядком — DoScript вже прокидає цей рядок у Python (indesign_bridge.py)
+// і в JSON-відповідь /api/execute, де launcher UI його показує.
+var RUN_LOG = [];
+// Сторінки, пропущені захисним принципом "не вгадувати" (невідповідна
+// кількість кластерів/ролей) -- НЕ ручні сторінки на кшталт 8, а справжні
+// збої автоматизації, які варто показати верстальниці окремим підсумком.
+var SKIPPED_PAGES = [];
+
+function log(message) {
+    $.writeln(message);
+    RUN_LOG.push(message);
+}
+
 function readTextFile(file) {
     file.encoding = "UTF-8";
     file.open("r");
@@ -178,7 +197,7 @@ function setRunningHeaderVariables(doc, issueDate, issueNumber) {
                 throw new Error("not found");
             }
         } catch (e) {
-            $.writeln(
+            log(
                 "Змінна колонтитула '" + name + "' відсутня в документі — пропущено. " +
                 "Створіть її вручну один раз (Type > Text Variables)."
             );
@@ -186,6 +205,30 @@ function setRunningHeaderVariables(doc, issueDate, issueNumber) {
         }
         variable.variableOptions.contents = String(pairs[name]);
     }
+}
+
+/**
+ * Короткий опис кластера для діагностики розбіжності "кластерів != статей"
+ * -- ID фрейму заголовка, його геометричні межі (у форматі InDesign
+ * geometricBounds: [y1, x1, y2, x2], пункти від верхнього лівого кута
+ * сторінки/розвороту) і перші ~40 символів тексту, щоб верстальниця могла
+ * впізнати, якій реальній статті/сторінці належить цей фрейм -- зокрема
+ * підтвердити чи спростувати підозру про фрейми "чужої" сторінки розвороту
+ * (напр. фрейм зі сторінки 3, що потрапив у кластери сторінки 2).
+ */
+function describeClusterForLog(cluster) {
+    var headlineText = "";
+    try {
+        headlineText = cluster.headline.item.contents;
+        if (headlineText && headlineText.length > 40) {
+            headlineText = headlineText.substr(0, 40) + "...";
+        }
+    } catch (e) {
+        headlineText = "(не вдалося прочитати текст)";
+    }
+    var bounds = cluster.headline.bounds;
+    return "id=" + cluster.headline.item.id + ", bounds=[" + bounds.join(", ") +
+        "], текст=\"" + headlineText + "\"";
 }
 
 /**
@@ -545,7 +588,7 @@ function applyHeadlineFontAlternation(item, plan, articleIndex, pageNumber, slug
     var fontName = fonts[articleIndex % fonts.length];
     var font = app.fonts.itemByName(fontName);
     if (!font.isValid) {
-        $.writeln(
+        log(
             "[Рівень 2] Сторінка " + pageNumber + ", стаття '" + slug + "': шрифт '" + fontName +
             "' для чергування заголовка не знайдено на цій машині -- пропущено без змін."
         );
@@ -557,18 +600,18 @@ function applyHeadlineFontAlternation(item, plan, articleIndex, pageNumber, slug
         try {
             item.texts[0].fontStyle = "Bold";
         } catch (styleErr) {
-            $.writeln(
+            log(
                 "[Рівень 2] Сторінка " + pageNumber + ", стаття '" + slug + "': шрифт '" + fontName +
                 "' встановлено, але стиль 'Bold' для нього недоступний (" + styleErr + ")."
             );
         }
-        $.writeln(
+        log(
             "[Рівень 2] Сторінка " + pageNumber + ", стаття '" + slug +
             "': шрифт заголовка встановлено на '" + fontName + "' (чергування, позиція " +
             articleIndex + " на сторінці)."
         );
     } catch (e) {
-        $.writeln(
+        log(
             "[Рівень 2] Сторінка " + pageNumber + ", стаття '" + slug +
             "': НЕ вдалося застосувати шрифт '" + fontName + "' (" + e + ")."
         );
@@ -629,7 +672,7 @@ function findArticleByRole(articles, role) {
 function applyPage1PhotoSlot(page, hexId, article, pageNumber) {
     var numericId = parseInt(hexId, 16);
     if (isNaN(numericId)) {
-        $.writeln(
+        log(
             "[Рівень 2, стор." + pageNumber + "] page1_layout: некоректний ID '" + hexId +
             "' для головного фото -- пропущено."
         );
@@ -637,14 +680,14 @@ function applyPage1PhotoSlot(page, hexId, article, pageNumber) {
     }
     var frame = findByExactId(page, numericId);
     if (!frame) {
-        $.writeln(
+        log(
             "[Рівень 2, стор." + pageNumber + "] page1_layout: фрейм з id " + hexId +
             " (головне фото) не знайдено на сторінці -- пропущено."
         );
         return;
     }
     if (!article.image_path) {
-        $.writeln(
+        log(
             "[Рівень 2, стор." + pageNumber + "] page1_layout: для головної статті '" +
             article.slug + "' немає image_path -- фото не переприв'язано."
         );
@@ -652,12 +695,12 @@ function applyPage1PhotoSlot(page, hexId, article, pageNumber) {
     }
     try {
         frame.allGraphics[0].itemLink.relink(new File(article.image_path));
-        $.writeln(
+        log(
             "[Рівень 2, стор." + pageNumber + "] page1_layout: головне фото переприв'язано на " +
             article.image_path + "."
         );
     } catch (e) {
-        $.writeln(
+        log(
             "[Рівень 2, стор." + pageNumber + "] page1_layout: НЕ вдалося переприв'язати головне " +
             "фото (" + e + ")."
         );
@@ -673,7 +716,7 @@ function applyPage1PhotoSlot(page, hexId, article, pageNumber) {
 function applyPage1TextSlot(page, hexId, text, minScale, pageNumber, label, subheadingIndices, subheadStyleName) {
     var numericId = parseInt(hexId, 16);
     if (isNaN(numericId)) {
-        $.writeln(
+        log(
             "[Рівень 2, стор." + pageNumber + "] page1_layout: некоректний ID '" + hexId +
             "' для " + label + " -- пропущено."
         );
@@ -681,7 +724,7 @@ function applyPage1TextSlot(page, hexId, text, minScale, pageNumber, label, subh
     }
     var frame = findByExactId(page, numericId);
     if (!frame) {
-        $.writeln(
+        log(
             "[Рівень 2, стор." + pageNumber + "] page1_layout: фрейм з id " + hexId + " (" + label +
             ") не знайдено на сторінці -- пропущено."
         );
@@ -690,14 +733,14 @@ function applyPage1TextSlot(page, hexId, text, minScale, pageNumber, label, subh
     if (setFrameText(frame, text)) {
         applySubheadingStyles(frame, subheadingIndices, subheadStyleName);
         if (!fitFrameText(frame, minScale)) {
-            $.writeln(
+            log(
                 "[Рівень 2, стор." + pageNumber + "] page1_layout: " + label + " не поміщається " +
                 "навіть при Horizontal Scale " + minScale + "% -- потрібне ручне втручання " +
                 "верстальниці."
             );
         }
     } else {
-        $.writeln(
+        log(
             "[Рівень 2, стор." + pageNumber + "] page1_layout: " + label + " -- немає тексту для " +
             "вставки (пропущено без змін)."
         );
@@ -730,9 +773,10 @@ function applyPage1TextSlot(page, hexId, text, minScale, pageNumber, label, subh
 function applyMifPage1Special(page, pagePlan, plan) {
     var layout = plan.page1_layout;
     if (!layout) {
-        $.writeln(
+        log(
             "[Рівень 2, стор." + pagePlan.page + "] page1_layout відсутній у плані -- пропущено."
         );
+        SKIPPED_PAGES.push(pagePlan.page + " (немає page1_layout у плані)");
         return;
     }
     var minScale = plan.min_horizontal_scale || 97;
@@ -750,7 +794,7 @@ function applyMifPage1Special(page, pagePlan, plan) {
             "тіло головної статті", mainArticle.subheading_indices, subheadStyleName
         );
     } else {
-        $.writeln(
+        log(
             "[Рівень 2, стор." + pagePlan.page + "] page1_layout: роль 'main' не призначено жодній " +
             "статті -- фото/заголовок/тіло головної статті не змінено."
         );
@@ -766,13 +810,13 @@ function applyMifPage1Special(page, pagePlan, plan) {
             "прогноз магнітних бур"
         );
     } else {
-        $.writeln(
+        log(
             "[Рівень 2, стор." + pagePlan.page + "] page1_layout: роль 'storm_forecast' не " +
             "призначено жодній статті -- прогноз магнітних бур не змінено."
         );
     }
 
-    $.writeln(
+    log(
         "[Рівень 2, стор." + pagePlan.page + "] page1_layout: спеціальна обробка сторінки 1 " +
         "завершена (\"Народні прикмети\" свідомо не автоматизовано)."
     );
@@ -797,11 +841,12 @@ function applyArticlesToPage(page, pagePlan, plan) {
         typeof plan.character_size_roles.headline_like_point_size_min === "number";
 
     if (!hasStyleRoles && !hasSizeRoles) {
-        $.writeln(
+        log(
             "[Рівень 2] Сторінка " + pagePlan.page + ": ні paragraph_style_roles, ні " +
             "character_size_roles для газети '" + plan.newspaper_id + "' не розв'язано -- " +
             "групування статей і relink фото пропущено для цієї сторінки."
         );
+        SKIPPED_PAGES.push(pagePlan.page + " (немає paragraph_style_roles/character_size_roles)");
         return;
     }
 
@@ -811,10 +856,20 @@ function applyArticlesToPage(page, pagePlan, plan) {
     var clusters = findArticleClusters(page, styleToRole, sizeRoles);
 
     if (clusters.length !== pagePlan.articles.length) {
-        $.writeln(
+        log(
             "[Рівень 2] Сторінка " + pagePlan.page + ": знайдено " + clusters.length +
             " кластер(и/ів) заголовків, але заплановано " + pagePlan.articles.length +
             " статей(і) -- пропущено без змін (не вгадуємо парування)."
+        );
+        for (var ci = 0; ci < clusters.length; ci++) {
+            log(
+                "[Рівень 2] Сторінка " + pagePlan.page + ": кластер #" + (ci + 1) + " -- " +
+                describeClusterForLog(clusters[ci])
+            );
+        }
+        SKIPPED_PAGES.push(
+            pagePlan.page + " (кластерів: " + clusters.length + ", статей у плані: " +
+            pagePlan.articles.length + ")"
         );
         return;
     }
@@ -837,19 +892,19 @@ function applyArticlesToPage(page, pagePlan, plan) {
         if (photoMember && article.image_path) {
             try {
                 photoMember.item.allGraphics[0].itemLink.relink(new File(article.image_path));
-                $.writeln(
+                log(
                     "[Рівень 2] Сторінка " + pagePlan.page + ", стаття '" + article.slug +
                     "': фото переприв'язано на " + article.image_path + "."
                 );
             } catch (e) {
-                $.writeln(
+                log(
                     "[Рівень 2] Сторінка " + pagePlan.page + ", стаття '" + article.slug +
                     "': НЕ вдалося переприв'язати фото (" + e + ")."
                 );
             }
         }
 
-        $.writeln(
+        log(
             "[Рівень 2] Сторінка " + pagePlan.page + ": заголовковий фрейм (id " + cluster.headline.item.id +
             ") <-> стаття '" + article.slug + "'."
         );
@@ -895,14 +950,14 @@ function applyArticlesToPage(page, pagePlan, plan) {
             }
         }
 
-        $.writeln(
+        log(
             "[Рівень 2] Сторінка " + pagePlan.page + ", стаття '" + article.slug + "': вставлено (" +
             (inserted.length > 0 ? inserted.join(", ") : "нічого") + "); пропущено без змін (" +
             (skipped.length > 0 ? skipped.join(", ") : "нічого") + ")."
         );
 
         if (overset.length > 0) {
-            $.writeln(
+            log(
                 "[Рівень 2] Сторінка " + pagePlan.page + ", стаття '" + article.slug +
                 "': УВАГА -- текст не поміщається навіть при Horizontal Scale " + minScale +
                 "% (" + overset.join(", ") + ") -- потрібне ручне втручання верстальниці."
@@ -951,13 +1006,29 @@ function main() {
         }
     }
 
-    $.writeln(
+    if (SKIPPED_PAGES.length > 0) {
+        log(
+            "!!! УВАГА: " + SKIPPED_PAGES.length + " сторінк(а/и) ПРОПУЩЕНО без жодних змін " +
+            "(стара стаття лишилась як є) -- " + SKIPPED_PAGES.join("; ") + ". " +
+            "Причина завжди одна з двох: невідповідність кількості кластерів/статей, або " +
+            "невідома роль абзацу -- див. деталі кластерів вище в цьому логу."
+        );
+    } else {
+        log(
+            "Усі заплановані сторінки (\"planned\"/\"planned_page1_special\") оброблено без " +
+            "пропусків через невідповідність кластерів."
+        );
+    }
+
+    log(
         "Готово (частково): preflight шрифтів, колонтитул, геометричне групування статей, " +
         "relink фото, вставка тексту заголовка/ліда/тіла, підтискання overset-тексту " +
         "(Horizontal Scale) та чергування шрифту заголовка (де підтверджено) виконано для " +
         "газет із розв'язаною мапою ролей (paragraph_style_roles або, як fallback, " +
         "character_size_roles); перевірка на реальному InDesign ще потрібна."
     );
+
+    return RUN_LOG.join("\n");
 }
 
 main();
