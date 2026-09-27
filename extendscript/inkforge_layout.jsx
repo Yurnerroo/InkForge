@@ -227,8 +227,9 @@ function describeClusterForLog(cluster) {
         headlineText = "(не вдалося прочитати текст)";
     }
     var bounds = cluster.headline.bounds;
-    return "id=" + cluster.headline.item.id + ", bounds=[" + bounds.join(", ") +
-        "], текст=\"" + headlineText + "\"";
+    return "id=" + cluster.headline.item.id +
+        (cluster.headline.isComboHeadline ? " (комбо: заголовок+тіло в одному фреймі)" : "") +
+        ", bounds=[" + bounds.join(", ") + "], текст=\"" + headlineText + "\"";
 }
 
 /**
@@ -356,8 +357,10 @@ function collectPageFrames(page, styleToRole, sizeRoles) {
         var tf = textFrames[i];
         var role = null;
         var styleName = null;
+        var paragraphCount = 0;
         try {
-            if (tf.parentStory.paragraphs.length > 0) {
+            paragraphCount = tf.parentStory.paragraphs.length;
+            if (paragraphCount > 0) {
                 styleName = tf.parentStory.paragraphs.item(0).appliedParagraphStyle.name;
                 role = styleToRole[styleName] || null;
             }
@@ -371,8 +374,19 @@ function collectPageFrames(page, styleToRole, sizeRoles) {
         // назва стилю абзацу реально застосована, навіть якщо роль не
         // розв'язалась -- саме це потрібно, щоб зрозуміти, чому фрейм не
         // потрапив у кластер заголовків (стиль не в paragraph_style_roles?
-        // порожній фрейм? інша роль?).
-        frames.push({ item: tf, kind: "text", role: role, bounds: itemBounds(tf), styleName: styleName });
+        // порожній фрейм? інша роль?). "paragraphCount" -- потрібен для
+        // "комбо"-евристики в findArticleClusters (див. коментар там):
+        // фрейм зі стилем "kicker_or_page_badge", але з КІЛЬКОМА абзацами
+        // -- це не рубрика/номер сторінки, а ціла міні-стаття
+        // заголовок+тіло в одному фреймі.
+        frames.push({
+            item: tf,
+            kind: "text",
+            role: role,
+            bounds: itemBounds(tf),
+            styleName: styleName,
+            paragraphCount: paragraphCount
+        });
     }
 
     var photoCandidates = [].concat(
@@ -397,20 +411,48 @@ function collectPageFrames(page, styleToRole, sizeRoles) {
 }
 
 /**
- * Групує фрейми сторінки навколо кожного заголовка (роль "headline") --
- * перевірений на MIF алгоритм (див. docs/architecture.md, "Групування
- * кількох статей..."; samples/article_clusters.py -- офлайн-валідація на
- * реальних IDML-зразках). Повертає кластери у порядку читання заголовків
- * (згори вниз, потім зліва направо); "members" містить решту фреймів
- * (лід/тіло/фото), приписаних до цього заголовка.
+ * "Комбо"-евристика для findArticleClusters: у реальних шаблонах MIF роль
+ * "kicker_or_page_badge" (стиль Zag_small) насправді перевикористовується
+ * для ТРЬОХ різних речей -- (1) мітка рубрики в один рядок ("треба
+ * знати"), (2) бейдж номера сторінки (одна цифра), і (3) ціла міні-стаття
+ * "заголовок+тіло" в ОДНОМУ текстовому фреймі (коротка замітка без
+ * окремого лід/тіло-фрейму). Випадки (1)/(2) -- завжди ОДИН абзац;
+ * випадок (3) -- ЗАВЖДИ кілька абзаців (заголовок + хоч один абзац тіла).
+ * Це підтверджений на реальних сторінках MIF (2, 3, 7) сигнал: якщо
+ * кількість абзаців у фреймі з цією роллю >= COMBO_MIN_PARAGRAPHS, фрейм
+ * трактується як додатковий кандидат-заголовок статті (isComboHeadline),
+ * а не як кікер/номер сторінки. Ризик хибного спрацювання лишається (див.
+ * docs/architecture.md, "Групування кількох статей..."), тож це не
+ * ввімкнено для інших ролей -- лише для цієї конкретної, вже підтвердженої
+ * неоднозначності.
+ */
+var COMBO_ELIGIBLE_ROLE = "kicker_or_page_badge";
+var COMBO_MIN_PARAGRAPHS = 2;
+
+/**
+ * Групує фрейми сторінки навколо кожного заголовка (роль "headline", або
+ * "комбо"-кандидат -- див. COMBO_ELIGIBLE_ROLE вище) -- перевірений на MIF
+ * алгоритм (див. docs/architecture.md, "Групування кількох статей...";
+ * samples/article_clusters.py -- офлайн-валідація на реальних
+ * IDML-зразках). Повертає кластери у порядку читання заголовків (згори
+ * вниз, потім зліва направо); "members" містить решту фреймів
+ * (лід/тіло/фото), приписаних до цього заголовка -- для комбо-кластерів
+ * зазвичай ПОРОЖНІЙ (увесь вміст уже лежить у самому headline-фреймі, див.
+ * cluster.headline.isComboHeadline в applyArticlesToPage).
  */
 function findArticleClusters(page, styleToRole, sizeRoles) {
     var frames = collectPageFrames(page, styleToRole, sizeRoles);
 
     var headlines = [];
     for (var i = 0; i < frames.length; i++) {
-        if (frames[i].role === "headline") {
-            headlines.push(frames[i]);
+        var f = frames[i];
+        if (f.role === "headline") {
+            f.isComboHeadline = false;
+            headlines.push(f);
+        } else if (f.kind === "text" && f.role === COMBO_ELIGIBLE_ROLE &&
+            f.paragraphCount >= COMBO_MIN_PARAGRAPHS) {
+            f.isComboHeadline = true;
+            headlines.push(f);
         }
     }
     headlines.sort(function (a, b) {
@@ -425,9 +467,9 @@ function findArticleClusters(page, styleToRole, sizeRoles) {
         clusters.push({ headline: headlines[h], members: [] });
     }
 
-    for (var f = 0; f < frames.length; f++) {
-        var frame = frames[f];
-        if (frame.role === null || frame.role === "headline") {
+    for (var f2 = 0; f2 < frames.length; f2++) {
+        var frame = frames[f2];
+        if (frame.role === null || frame.role === "headline" || frame.isComboHeadline) {
             continue;
         }
         var candidates = [];
@@ -626,9 +668,16 @@ function applyHeadlineFontAlternation(item, plan, articleIndex, pageNumber, slug
     }
 
     try {
-        item.texts[0].appliedFont = font;
+        // Застосовуємо лише до ПЕРШОГО абзацу (не всього item.texts[0]) --
+        // для звичайного окремого заголовкового фрейму це те саме (там і
+        // так лише один абзац), а для "комбо"-фрейму (заголовок+тіло в
+        // одній історії, див. COMBO_ELIGIBLE_ROLE) це критично: інакше
+        // чергування шрифту зачепило б і текст тіла статті, а не лише
+        // заголовок.
+        var headlineRange = item.paragraphs.item(0).texts[0];
+        headlineRange.appliedFont = font;
         try {
-            item.texts[0].fontStyle = "Bold";
+            headlineRange.fontStyle = "Bold";
         } catch (styleErr) {
             log(
                 "[Рівень 2] Сторінка " + pageNumber + ", стаття '" + slug + "': шрифт '" + fontName +
@@ -960,36 +1009,65 @@ function applyArticlesToPage(page, pagePlan, plan) {
         var skipped = [];
         var overset = [];
 
-        if (setFrameText(cluster.headline.item, article.title)) {
-            inserted.push("заголовок");
-            if (!fitFrameText(cluster.headline.item, minScale)) {
-                overset.push("заголовок");
+        if (cluster.headline.isComboHeadline) {
+            // "Комбо"-кластер (див. COMBO_ELIGIBLE_ROLE): заголовок і тіло
+            // статті живуть в ОДНІЙ історії одного фрейма, тому їх не можна
+            // вставляти окремими викликами setFrameText (кожен виклик
+            // затирає всю історію) -- натомість збираємо один об'єднаний
+            // текст (заголовок [+ лід] + тіло) і вставляємо його одним
+            // викликом, а індекси підзаголовків зсуваємо на кількість
+            // абзаців, вставлених ПЕРЕД тілом.
+            var comboLeadOffset = article.lead ? 1 : 0;
+            var comboBodyText = article.lead ? (article.lead + "\n" + article.body) : article.body;
+            var comboText = article.title + "\n" + comboBodyText;
+
+            if (setFrameText(cluster.headline.item, comboText)) {
+                inserted.push(article.lead ? "заголовок+лід+тіло (комбо)" : "заголовок+тіло (комбо)");
+                if (!fitFrameText(cluster.headline.item, minScale)) {
+                    overset.push("комбо");
+                }
+                applyHeadlineFontAlternation(cluster.headline.item, plan, i, pagePlan.page, article.slug);
+                var comboShift = 1 + comboLeadOffset;
+                var shiftedIndices = [];
+                for (var si = 0; si < article.subheading_indices.length; si++) {
+                    shiftedIndices.push(article.subheading_indices[si] + comboShift);
+                }
+                applySubheadingStyles(cluster.headline.item, shiftedIndices, subheadStyleName);
+            } else {
+                skipped.push("заголовок+тіло (комбо)");
             }
-            applyHeadlineFontAlternation(cluster.headline.item, plan, i, pagePlan.page, article.slug);
         } else {
-            skipped.push("заголовок");
-        }
-
-        if (leadMember) {
-            if (setFrameText(leadMember.item, article.lead)) {
-                inserted.push("лід");
-                if (!fitFrameText(leadMember.item, minScale)) {
-                    overset.push("лід");
+            if (setFrameText(cluster.headline.item, article.title)) {
+                inserted.push("заголовок");
+                if (!fitFrameText(cluster.headline.item, minScale)) {
+                    overset.push("заголовок");
                 }
+                applyHeadlineFontAlternation(cluster.headline.item, plan, i, pagePlan.page, article.slug);
             } else {
-                skipped.push("лід");
+                skipped.push("заголовок");
             }
-        }
 
-        if (bodyMember) {
-            if (setFrameText(bodyMember.item, article.body)) {
-                inserted.push("тіло");
-                if (!fitFrameText(bodyMember.item, minScale)) {
-                    overset.push("тіло");
+            if (leadMember) {
+                if (setFrameText(leadMember.item, article.lead)) {
+                    inserted.push("лід");
+                    if (!fitFrameText(leadMember.item, minScale)) {
+                        overset.push("лід");
+                    }
+                } else {
+                    skipped.push("лід");
                 }
-                applySubheadingStyles(bodyMember.item, article.subheading_indices, subheadStyleName);
-            } else {
-                skipped.push("тіло");
+            }
+
+            if (bodyMember) {
+                if (setFrameText(bodyMember.item, article.body)) {
+                    inserted.push("тіло");
+                    if (!fitFrameText(bodyMember.item, minScale)) {
+                        overset.push("тіло");
+                    }
+                    applySubheadingStyles(bodyMember.item, article.subheading_indices, subheadStyleName);
+                } else {
+                    skipped.push("тіло");
+                }
             }
         }
 
