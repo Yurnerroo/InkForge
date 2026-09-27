@@ -34,6 +34,12 @@
 
 #target indesign
 
+// ExtendScript -- це ES3-рушій і НЕ має вбудованого JSON.parse/stringify
+// (на відміну від сучасного браузерного/Node.js JS). Підключаємо
+// стандартний публічний поліфіл (Дуглас Крокфорд, json2.js), який сам
+// нічого не робить, якщо JSON вже є в середовищі.
+#include "vendor/json2.jsx"
+
 // Пресет PDF/X-1a:2001 -- вбудований в Adobe InDesign (квадратні дужки --
 // частина його точної назви для scripting API, не косметика).
 var DEFAULT_PDF_PRESET = "[PDF/X-1a:2001]";

@@ -65,6 +65,12 @@
 
 #target indesign
 
+// ExtendScript -- це ES3-рушій і НЕ має вбудованого JSON.parse/stringify
+// (на відміну від сучасного браузерного/Node.js JS). Підключаємо
+// стандартний публічний поліфіл (Дуглас Крокфорд, json2.js), який сам
+// нічого не робить, якщо JSON вже є в середовищі.
+#include "vendor/json2.jsx"
+
 function readTextFile(file) {
     file.encoding = "UTF-8";
     file.open("r");
@@ -98,9 +104,6 @@ function pickFile(promptText, scriptArgKey) {
 
 function loadLayoutPlan(planFile) {
     var raw = readTextFile(planFile);
-    // Сучасний ExtendScript (InDesign CC 2015+) має вбудований JSON.parse.
-    // Якщо ваша версія InDesign старіша й JSON недоступний — оновіть InDesign
-    // або підключіть окремий JSON-полiфіл перед цим викликом.
     return JSON.parse(raw);
 }
 
