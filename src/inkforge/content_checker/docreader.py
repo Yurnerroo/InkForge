@@ -12,12 +12,13 @@ recognizable style is used (or for ``.txt``, which has no styles at all).
 
 The positional fallback also supports **multiple articles in one file**,
 separated by one or more blank lines/paragraphs. A confirmed convention:
-inside one article, real subheadlines are often bold/short and may also
-lack a trailing period (e.g. rhetorical questions, short pull-quotes) --
-so the period check ALONE is not enough to detect a new article; a new
-article only starts where there is BOTH an actual blank line/paragraph
-gap AND a period-less first paragraph after that gap. See
-``read_text_metrics_multi``.
+inside one article, real subheadlines are short standalone phrases with
+NO sentence-ending punctuation at all -- a short dialogue line or
+rhetorical remark that ends with ``!``/``?`` (e.g. ``– А груші?``) is
+still a complete sentence and stays body text, so it does not by itself
+start a new article; a new article only starts where there is BOTH an
+actual blank line/paragraph gap AND an unpunctuated first paragraph
+after that gap. See ``read_text_metrics_multi``.
 """
 
 from __future__ import annotations
@@ -36,9 +37,15 @@ _LEAD_STYLE_HINTS = ("лід", "лид", "vrizka", "lead")
 
 # Positional fallback (no recognizable style, or plain .txt) and
 # multi-article splitting both rely on this confirmed convention: a
-# paragraph is a title/subheadline if it does NOT end with a period;
-# trailing closing quotes/brackets are ignored before the check.
+# paragraph is a title/subheadline if it does NOT end with sentence-ending
+# punctuation (period, exclamation mark, question mark, or ellipsis);
+# trailing closing quotes/brackets are ignored before the check. A short
+# dialogue line or rhetorical remark that IS a complete sentence (e.g.
+# "– А груші?") must still end with one of these marks, so it stays body
+# text -- only a bare, unpunctuated phrase (a real title/subheadline) is
+# period-less/exclamation-less/question-mark-less.
 _TRAILING_STRIP_CHARS = "\"'»)]” "
+_SENTENCE_TERMINATORS = (".", "!", "?", "…")
 
 
 @dataclass
@@ -156,7 +163,7 @@ def _read_docx_multi(path: Path) -> list[ArticleText]:
         skip = {i for i in (title_idx, lead_idx) if i is not None}
         body_paragraphs = [p for i, p in enumerate(paragraphs) if i not in skip]
         subheading_indices = [
-            j for j, p in enumerate(body_paragraphs) if not _ends_with_period(p)
+            j for j, p in enumerate(body_paragraphs) if not _ends_with_sentence_terminator(p)
         ]
         body = "\n".join(body_paragraphs)
         return [_build_result(title, lead, body, subheading_indices=subheading_indices)]
@@ -166,8 +173,9 @@ def _read_docx_multi(path: Path) -> list[ArticleText]:
     if paragraphs:
         warnings.append(
             "No recognized title/lead paragraph style found; used positional "
-            "fallback (first paragraph = title, second = lead, period-less "
-            "interior paragraphs = subheadings) — please double-check the split"
+            "fallback (first paragraph = title, second = lead, interior "
+            "paragraphs without sentence-ending punctuation = subheadings) "
+            "— please double-check the split"
         )
     if not splits:
         return [_build_result("", "", "", warnings=warnings)]
@@ -231,14 +239,21 @@ def _blank_gaps_from_lines(lines: list[str]) -> list[bool]:
     return result
 
 
-def _ends_with_period(text: str) -> bool:
-    """True if ``text``'s last "real" character is a period -- the
-    confirmed signal that a paragraph is body text rather than a
+def _ends_with_sentence_terminator(text: str) -> bool:
+    """True if ``text``'s last "real" character is sentence-ending
+    punctuation (``.``, ``!``, ``?``, or ``…``) -- the confirmed signal
+    that a paragraph is a complete sentence (body text) rather than a
     title/subheadline. Trailing closing quotes/brackets/whitespace are
-    stripped first so ``Заголовок."`` is still recognized correctly."""
+    stripped first so ``Заголовок."`` or ``«А груші?»`` are still
+    recognized correctly. A short dialogue line or rhetorical remark that
+    ends with ``!``/``?`` (e.g. ``– А груші?``) is a real sentence and
+    must NOT be mistaken for a period-less title/subheadline just because
+    it isn't a period specifically (confirmed real-world bug: such a line
+    was misdetected as an interior subheading and, worse, as a new-article
+    boundary when preceded by a blank line)."""
 
     stripped = text.rstrip().rstrip(_TRAILING_STRIP_CHARS)
-    return stripped.endswith(".")
+    return stripped.endswith(_SENTENCE_TERMINATORS)
 
 
 def _split_positional_multi(
@@ -250,16 +265,18 @@ def _split_positional_multi(
     - The first paragraph of each article is its title (unconditionally
       for the very first paragraph of the file; for subsequent articles,
       a new article starts only where there is BOTH an actual blank
-      line/paragraph gap (``blank_before[i]``) AND a period-less
-      paragraph right after that gap).
+      line/paragraph gap (``blank_before[i]``) AND a paragraph right
+      after that gap that does NOT end with sentence-ending punctuation
+      (``.``, ``!``, ``?``, ``…``)).
     - The paragraph right after a title is unconditionally that article's
       lead (regardless of whether it ends with a period) -- confirmed
       convention: the first paragraph of an article's body is always its
       lead/intro.
-    - Any later paragraph that does NOT end with a period is an interior
-      subheading (there can be several through one article's body) --
-      its 0-based index within the assembled ``body`` (splitting on
-      ``\\n``) is recorded in the returned ``subheading_indices`` list.
+    - Any later paragraph that does NOT end with sentence-ending
+      punctuation is an interior subheading (there can be several through
+      one article's body) -- its 0-based index within the assembled
+      ``body`` (splitting on ``\\n``) is recorded in the returned
+      ``subheading_indices`` list.
     - Everything else is regular body text, accumulated until the next
       real article boundary. One or two blank lines between articles
       both work the same way -- only presence/absence of a gap matters,
@@ -268,10 +285,13 @@ def _split_positional_multi(
     ``blank_before`` must be aligned with ``paragraphs`` (same length,
     ``blank_before[i]`` true iff a blank line/paragraph preceded
     ``paragraphs[i]`` in the original document). Required -- **without
-    it, a bold/period-less subheadline inside a single article's body
-    (e.g. a rhetorical question) would be misdetected as a new article**;
-    this was confirmed against real newspaper content where such
-    subheadlines are common.
+    it, a bold/unpunctuated subheadline inside a single article's body
+    (e.g. a short standalone phrase) would be misdetected as a new
+    article**; this was confirmed against real newspaper content where
+    such subheadlines are common. A short dialogue line or rhetorical
+    remark ending in ``!``/``?`` (e.g. ``– А груші?``) is still a
+    complete sentence and must NOT trigger a split just because it isn't
+    specifically a period (confirmed real-world bug).
     """
 
     if not paragraphs:
@@ -294,11 +314,12 @@ def _split_positional_multi(
 
     while i < len(paragraphs):
         para = paragraphs[i]
-        if blank_before[i] and not _ends_with_period(para):
+        if blank_before[i] and not _ends_with_sentence_terminator(para):
             # A blank-line gap precedes this paragraph, and it doesn't end
-            # with a period -- a new article begins here (the title+lead
-            # of the current article were already consumed above, so this
-            # check doesn't need to wait for body_parts to be non-empty).
+            # with sentence-ending punctuation -- a new article begins
+            # here (the title+lead of the current article were already
+            # consumed above, so this check doesn't need to wait for
+            # body_parts to be non-empty).
             articles.append(
                 (
                     title,
@@ -313,8 +334,8 @@ def _split_positional_multi(
             subheading_indices = []
             i = consume_lead(i + 1, lead_holder)
             continue
-        if not _ends_with_period(para):
-            # Period-less paragraph with no preceding blank-line gap (or
+        if not _ends_with_sentence_terminator(para):
+            # Unpunctuated paragraph with no preceding blank-line gap (or
             # body hasn't started yet) -- an interior subheading, not a
             # new article.
             subheading_indices.append(len(body_parts))
