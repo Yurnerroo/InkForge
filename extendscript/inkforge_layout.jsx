@@ -580,6 +580,45 @@ function applySubheadingStyles(item, indices, subheadStyleName) {
 }
 
 /**
+ * Застосовує заданий стиль абзацу до ДІАПАЗОНУ абзаців історії фрейму,
+ * від "startIndex" (0-based, включно) до кінця. Критично для "комбо"-
+ * кластерів (COMBO_ELIGIBLE_ROLE): заголовок і [лід і] тіло статті
+ * вставляються ОДНИМ викликом setFrameText в один спільний фрейм/історію,
+ * чий ВЛАСНИЙ стиль абзацу -- заголовковий/кікерний (напр. "Zag_small"),
+ * розрахований на короткий 1-2-абзацний текст. Без цього кроку весь
+ * багатоабзацний текст ліда й тіла лишається з тим самим (зазвичай значно
+ * більшим за кеглем і з більшими міжабзацними відступами) заголовковим
+ * стилем -- кожен абзац тіла статті виглядає як окремий "заголовок",
+ * розкиданий по всій висоті фрейма, і викликає катастрофічний overset,
+ * який Horizontal Scale (fitFrameText) не годен виправити. Мовчки нічого
+ * не робить, якщо стиль не задано чи не знайдено в документі (профіль без
+ * відповідної ролі -- не помилка, просто фікс не застосовується).
+ */
+function applyStyleFromIndex(item, startIndex, styleName) {
+    if (!styleName || startIndex < 0) {
+        return;
+    }
+    var style;
+    try {
+        var doc = item.parentStory.parent;
+        style = doc.paragraphStyles.itemByName(styleName);
+        if (!style.isValid) {
+            return;
+        }
+    } catch (e) {
+        return;
+    }
+    var paragraphs = item.parentStory.paragraphs;
+    for (var i = startIndex; i < paragraphs.length; i++) {
+        try {
+            paragraphs.item(i).appliedParagraphStyle = style;
+        } catch (e2) {
+            // Best effort -- one bad paragraph shouldn't block the rest.
+        }
+    }
+}
+
+/**
  * Вставляє текст у фрейм замість поточного вмісту story. Абзаци у "text"
  * розділені "\n" (формат Рівня 1) -- перед вставкою заміняються на "\r"
  * (розрив абзацу в InDesign). Якщо "text" порожній -- нічого не робить і
@@ -932,6 +971,11 @@ function applyArticlesToPage(page, pagePlan, plan) {
     var styleToRole = hasStyleRoles ? buildStyleToRoleMap(plan.paragraph_style_roles) : {};
     var sizeRoles = hasSizeRoles ? plan.character_size_roles : null;
     var subheadStyleName = hasStyleRoles ? firstStyleNameForRole(plan.paragraph_style_roles, "subheadline") : null;
+    // Використовуються лише для "комбо"-кластерів (див. applyStyleFromIndex
+    // нижче) -- переформатовують лід/тіло, вставлені в один фрейм разом із
+    // заголовком, на їхні "рідні" стилі замість заголовкового/кікерного.
+    var comboLeadStyleName = hasStyleRoles ? firstStyleNameForRole(plan.paragraph_style_roles, "lead_intro") : null;
+    var comboBodyStyleName = hasStyleRoles ? firstStyleNameForRole(plan.paragraph_style_roles, "body") : null;
     var clusters = findArticleClusters(page, styleToRole, sizeRoles);
 
     if (clusters.length !== pagePlan.articles.length) {
@@ -1020,14 +1064,23 @@ function applyArticlesToPage(page, pagePlan, plan) {
             var comboLeadOffset = article.lead ? 1 : 0;
             var comboBodyText = article.lead ? (article.lead + "\n" + article.body) : article.body;
             var comboText = article.title + "\n" + comboBodyText;
+            var comboShift = 1 + comboLeadOffset;
 
             if (setFrameText(cluster.headline.item, comboText)) {
                 inserted.push(article.lead ? "заголовок+лід+тіло (комбо)" : "заголовок+тіло (комбо)");
+                // Абзац 0 (заголовок) лишає свій "рідний" стиль фрейму
+                // (напр. "Zag_small"). Лід (якщо є) і тіло -- окремі
+                // абзаци того ж об'єднаного вставленого тексту -- інакше
+                // вони теж лишилися б із заголовковим стилем, що й було
+                // причиною катастрофічного overset (див. applyStyleFromIndex).
+                if (article.lead && comboLeadStyleName) {
+                    applyStyleFromIndex(cluster.headline.item, 1, comboLeadStyleName);
+                }
+                applyStyleFromIndex(cluster.headline.item, comboShift, comboBodyStyleName);
                 if (!fitFrameText(cluster.headline.item, minScale)) {
                     overset.push("комбо");
                 }
                 applyHeadlineFontAlternation(cluster.headline.item, plan, i, pagePlan.page, article.slug);
-                var comboShift = 1 + comboLeadOffset;
                 var shiftedIndices = [];
                 for (var si = 0; si < article.subheading_indices.length; si++) {
                     shiftedIndices.push(article.subheading_indices[si] + comboShift);
