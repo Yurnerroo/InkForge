@@ -2,100 +2,87 @@
 
 # InkForge
 
-Автоматизація верстки щотижневої газети в Adobe InDesign — від перевірки контенту до готового друк-PDF у кілька кліків.
+![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![InDesign](https://img.shields.io/badge/Adobe_InDesign-ExtendScript-FF3366)
+![Tests](https://img.shields.io/badge/tests-147_passing-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-blue)
 
-> Статус: **Рівень 1 (Content Checker) готовий**. Рівень 2 (планувальник верстки) — Python-частина (`inkforge-plan`) готова й покрита тестами; ExtendScript-виконавець для InDesign реалізує геометричне групування статей, relink фото, чергування шрифту заголовка (де підтверджено) і спеціальний випадок для 1 сторінки МІФ (головна стаття + прогноз магнітних бур) — усе для 3 профільованих газет, але ще не перевірено на реальному документі (див. [extendscript/README.md](extendscript/README.md)). Рівень 3 (One-Click Launcher, FastAPI) тепер покриває весь ланцюжок: перевірка → план → верстка в InDesign → експорт друк-PDF, кожен крок — окрема підтверджувана кнопка; обидва COM-кроки (верстка й експорт) ще не перевірені наживо.
+**Перетворює папку з текстами й фото на готову до друку щотижневу газету, зверстану в Adobe InDesign, у кілька кліків.**
 
-## Для кого
+Верстальниця зберігає повний контроль: InkForge бере на себе рутину, а все інше можна доопрацювати вручну після автоматичної верстки.
 
-Інструмент для людини, яка вже впевнено верстає в Adobe InDesign та Photoshop, але хоче автоматизувати рутинну частину: розкладання підготовлених текстів і фото по вже готових файлах-основах (попередніх випусках), з можливістю ручного доопрацювання після автоматичної верстки.
+## Проблема
 
-## Документація
+Невелику газету щотижня верстають вручну: беруть `.indd` минулого випуску, по одному замінюють старі тексти й фото на нові та експортують PDF для друку. Це рутина, але її складно автоматизувати наосліп: кожна з **3 газет** має власну структуру сторінок, стилі та винятки, і все це ніде не було задокументовано.
 
-- [docs/requirements.md](docs/requirements.md) — повний перелік зібраних вимог (контент, типографіка, друк, виняткові сторінки).
-- [docs/architecture.md](docs/architecture.md) — 4 рівні автоматизації, технологічний стек, знахідки з аналізу реальних IDML-зразків, відкриті питання.
-- [docs/content-structure.md](docs/content-structure.md) — конвенція папок/файлів для тижневого випуску.
-- [docs/first-run-checklist.md](docs/first-run-checklist.md) — покроковий чек-лист для першого реального запуску на Windows+InDesign верстальниці.
+InkForge перетворює ці неписані знання на версіоновану, покриту тестами конфігурацію та код.
 
-## Технологічний стек
+## Як це працює
 
-- **Python** — підготовка та перевірка контенту (`src/inkforge/content_checker`), планування верстки (`src/inkforge/layout_engine`), one-click launcher (Рівень 3).
-- **Adobe InDesign ExtendScript/UXP** — власна автоверстка та експорт друк-PDF (Рівень 2), бо це найнадійніше відтворює справжню газетну верстку (CMYK, обріз, PDF/X-1a).
-
-## Структура репозиторію
-
-```
-docs/                     вимоги, архітектура, конвенції контенту
-profiles/                 по одному YAML-профілю на газету (схема — profiles/schema.md)
-src/inkforge/
-  content_checker/        Рівень 1: сканування випуску, побудова manifest.json
-  layout_engine/          Рівень 2 (Python-частина): manifest.json + профіль -> layout_plan.json
-  launcher/               Рівень 3: FastAPI-застосунок, що керує Рівнями 1-2 і InDesign
-extendscript/              Рівень 2 (InDesign-частина): виконавець layout_plan.json (частковий)
-tests/                    pytest-тести для Python-частини
+```mermaid
+flowchart LR
+    A[Папка випуску<br/>тексти + фото] --> B[1. Content Checker<br/>manifest.json]
+    B --> C[2. Планувальник верстки<br/>layout_plan.json]
+    C --> D[Виконавець InDesign<br/>ExtendScript]
+    D --> E[Друк-PDF<br/>PDF/X-1a]
+    L[3. FastAPI Launcher] -. запускає кожен крок .-> B
 ```
 
-## Рівень 1: Content Checker
+| Рівень | Що робить | Статус |
+|---|---|---|
+| 1. Content Checker | Зіставляє тексти й фото, перевіряє обсяг тексту та DPI/колірний режим фото, формує `manifest.json` | ✅ Готово |
+| 2. Автоверстка | Python-планувальник + YAML-профіль газети → `layout_plan.json`, який застосовує в InDesign ExtendScript-виконавець | 🚧 Python-частина готова; запуск в InDesign перевіряється |
+| 3. One-Click Launcher | Локальний FastAPI-застосунок, що запускає весь ланцюжок і керує InDesign через Windows COM | 🚧 Ланцюжок зібрано; запуск в InDesign перевіряється |
 
-Перевіряє папку тижневого випуску (структура — [docs/content-structure.md](docs/content-structure.md)):
-зіставляє тексти й фото за іменем файлу, рахує обсяг тексту, читає метадані фото
-(розміри, DPI, кольоровий режим), формує звіт про проблеми та `manifest.json` для Рівня 2.
+## Інженерні особливості
 
-```bash
-pip install -e ".[dev]"
-inkforge-check path/to/2026-W40_gazeta-x --newspaper "Ти і Я"
-```
+- **Розібраний IDML**, недокументований XML-формат InDesign: на реальних робочих файлах зіставлено стилі абзаців із ролями в статті.
+- **Рушій на конфігурації**: одна спільна кодова база, один YAML-профіль на газету, жодних значень конкретної газети в коді.
+- **Бекенд керує десктопною програмою**: FastAPI-сервіс керує InDesign через Windows COM.
+- **Налагодження реальної геометрії**: вміст поза сторінкою (монтажний стіл) псував групування фреймів; виправлено суворою перевіркою належності до сторінки.
+- **147 тестів**, зокрема такі, що перевіряють коректну відмову COM-кроків без встановленого InDesign, а не просто підміняють його моками.
+- **Невеликі PR**, документація оновлюється разом із кодом.
 
-Це виведе звіт у консоль і запише `manifest.json` у папку випуску
-(шлях можна змінити прапорцем `--manifest-out`, або пропустити запис `--no-manifest`).
+## Швидкий старт
 
-## Рівень 2: планувальник верстки
-
-Python-частина читає `manifest.json` (з Рівня 1) і профіль газети
-(`profiles/<id>.yaml`, схема — [profiles/schema.md](profiles/schema.md)), і
-будує `layout_plan.json`: які сторінки автоматизувати, який колірний режим і
-пропорційний розподіл простору між статтями. ExtendScript-виконавець для
-самого InDesign, що споживає цей план, — ще чорновий (див.
-[extendscript/README.md](extendscript/README.md)).
-
-```bash
-inkforge-plan path/to/2026-W40_gazeta-x/manifest.json --profile ty_i_ya
-```
-
-## Рівень 3: One-Click Launcher
-
-Локальний веб-застосунок на FastAPI, що об'єднує Рівні 1-2 і (за наявності
-Windows+InDesign) сам керує InDesign через COM — одна сторінка з кнопками
-"Перевірити контент" → "Побудувати план" → "Зверстати в InDesign" →
-(ручне доправлення) → "Експорт друк-PDF". Деталі —
-[docs/architecture.md](docs/architecture.md), розділ "Рівень 3".
-
-**Windows, без командного рядка:** подвійний клік на `setup.bat` (один раз),
-далі щоразу — на `start_launcher.bat`.
+**Windows, без командного рядка:** один раз двічі клацніть `setup.bat`, далі щоразу — `start_launcher.bat`.
 
 **Або вручну:**
 
 ```bash
+pip install -e ".[dev]"
+
+inkforge-check  path/to/issue-folder --newspaper <profile_id>   # Рівень 1
+inkforge-plan   path/to/issue-folder/manifest.json --profile <profile_id>   # Рівень 2
+
 pip install -e ".[launcher]"
-inkforge-launcher
-```
+inkforge-launcher   # Рівень 3: локальний веб-інтерфейс із 4 кроками з підтвердженням
 
-Відкриє `http://127.0.0.1:8765` у браузері. Кроки "Перевірити контент" і
-"Побудувати план" не залежать від InDesign і повністю покриті тестами; кроки
-"Зверстати в InDesign" і "Експорт друк-PDF" (COM-автоматизація) ще не
-перевірені на реальному InDesign-встановленні.
-
-Запуск тестів:
-
-```bash
 pytest
 ```
 
-## Оновлення проєкту (без ручного скачування ZIP)
+Лаунчер відкривається за адресою `http://127.0.0.1:8765`.
 
-Для комп'ютера верстальниці є файл
-[`scripts/update_and_run.bat`](scripts/update_and_run.bat): подвійний клік —
-і він робить `git pull` у папці проєкту, підтягуючи останню версію коду з
-GitHub. Папка проєкту вже має бути git-репозиторієм (`git clone` виконано
-один раз заздалегідь), і потрібен встановлений
-[Git for Windows](https://git-scm.com/download/win).
+## Структура репозиторію
+
+```
+src/inkforge/
+  content_checker/   Рівень 1
+  layout_engine/     Рівень 2 (Python-планувальник)
+  launcher/          Рівень 3 (FastAPI)
+extendscript/        Рівень 2 (виконавець для InDesign)
+profiles/            один YAML-профіль на газету
+docs/                вимоги, архітектура, конвенції
+tests/               pytest-тести
+```
+
+## Документація
+
+[вимоги](docs/requirements.md) · [архітектура](docs/architecture.md) · [структура контенту](docs/content-structure.md) · [чек-лист першого запуску](docs/first-run-checklist.md) · [нотатки щодо ExtendScript](extendscript/README.md)
+
+Щоб оновити проєкт на комп'ютері верстальниці, двічі клацніть [`scripts/update_and_run.bat`](scripts/update_and_run.bat). Він виконує `git pull` в уже клонованій папці проєкту; потрібен [Git for Windows](https://git-scm.com/download/win).
+
+## Ліцензія
+
+[MIT](LICENSE)
