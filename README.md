@@ -2,141 +2,81 @@
 
 # InkForge
 
-Automation toolkit that takes a weekly newspaper from raw text/photo files to
-a print-ready PDF laid out in Adobe InDesign — in a few clicks instead of a
-fully manual pass, while keeping the layout person able to fine-tune anything
-by hand afterwards.
+![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![InDesign](https://img.shields.io/badge/Adobe_InDesign-ExtendScript-FF3366)
+![Tests](https://img.shields.io/badge/tests-147_passing-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-blue)
 
-> **Status:** Level 1 (Content Checker) is done and tested. Level 2 (layout
-> planning) has a complete, tested Python side (`inkforge-plan`); the InDesign
-> ExtendScript executor handles geometric article-frame clustering, photo
-> relink, headline-font alternation, and a page-specific special case (MIF
-> page 1: main-article + storm-forecast slot) for the newspapers analyzed so
-> far, but is still not verified against a real InDesign installation (see
-> [extendscript/README.md](extendscript/README.md)). Level 3 (One-Click
-> Launcher, FastAPI) now covers the full pipeline — check, plan, lay out in
-> InDesign, and export a print-ready `PDF/X-1a` — as four independently
-> confirmable steps; the two InDesign-COM steps are also unverified in a real
-> environment.
+**Turns a folder of raw text and photos into a print-ready weekly newspaper, laid out in Adobe InDesign, in a few clicks.**
+
+The layout person keeps full control: InkForge does the repetitive work, and anything can still be fine-tuned by hand afterwards.
 
 ## The problem
 
-A small newspaper is laid out every week by hand in Adobe InDesign: the same
-previous issue's `.indd` file is reused as a starting point, old text/photos
-are manually replaced with new ones, and the print PDF is exported with a
-fixed preset. This is repetitive but not simple to automate blindly — every
-newspaper template has its own page structure, color rules, paragraph styles
-and exceptions, and none of that was documented anywhere going in. InkForge
-turns that tribal knowledge into versioned, testable configuration and code,
-one validated step at a time, for **3 different newspaper templates**.
+A small newspaper is laid out by hand every week. Last week's `.indd` file is reused, old text and photos are swapped for new ones one by one, and the PDF is exported for print. It's repetitive, but hard to automate blindly: each of the **3 newspapers** has its own page structure, styles and exceptions, and none of it was documented.
 
-## Engineering highlights
+InkForge turns that tribal knowledge into versioned, tested configuration and code.
 
-- **Reverse-engineered IDML** (InDesign's zipped-XML interchange format) from
-  real production files with no schema documentation available, to build a
-  reliable paragraph-style → article-role mapping per newspaper.
-- **Hypothesis-driven debugging of a real geometry bug**: leftover
-  "pasteboard" content (never actually printed) was silently corrupting a
-  page-content clustering algorithm; diagnosed via targeted bounding-box
-  dumps and fixed with a strict page-membership check.
-- **Config-driven architecture**: a single shared engine reads a per-newspaper
-  YAML profile (`profiles/<id>.yaml`) — no newspaper-specific names, styles,
-  or frame IDs are ever hardcoded in the shared code.
-- **A small local FastAPI service** (`launcher/`) orchestrates the pipeline
-  end to end and drives a desktop application (Adobe InDesign) via Windows
-  COM automation — a real, if unconventional, backend-integration surface on
-  top of the pure data-processing pieces.
-- **Docs-first, incrementally shipped**: every capability lands as a small,
-  independently reviewed pull request with its own commits and tests —
-  architecture and requirements docs are updated alongside the code, not
-  after the fact.
-- **105 passing unit tests** (`pytest`) covering content parsing, layout
-  planning, JSON plan serialization, and the Level 3 API (with a real,
-  environment-honest test asserting the COM steps fail gracefully when
-  InDesign isn't available, rather than mocking it away).
+## How it works
 
-## Architecture — 4 levels of automation
+```mermaid
+flowchart LR
+    A[Issue folder<br/>text + photos] --> B[1. Content Checker<br/>manifest.json]
+    B --> C[2. Layout Planner<br/>layout_plan.json]
+    C --> D[InDesign executor<br/>ExtendScript]
+    D --> E[Print-ready<br/>PDF/X-1a]
+    L[3. FastAPI Launcher] -. runs every step .-> B
+```
 
 | Level | What it does | Status |
 |---|---|---|
-| 0 | Fully manual baseline (today, before this project) | n/a |
-| 1 | **Content Checker** — scans a weekly issue folder, matches text+photo files, computes word counts and photo metadata (size/DPI/color mode), reports problems, writes `manifest.json` | ✅ Done |
-| 2 | **Auto-Layout** — Python planner turns `manifest.json` + a newspaper profile into `layout_plan.json`; an InDesign ExtendScript executor applies it (font preflight, running headers, geometric article-frame clustering, photo relink, headline-font alternation, and a page-specific special case for one newspaper's front page) | 🚧 In progress — all 3 profiled newspapers covered, real-InDesign verification pending |
-| 3 | **One-Click Launcher** — local FastAPI web app driving Levels 1-2, plus (Windows-only) COM automation to run the InDesign executor and export a print-ready `PDF/X-1a`, without switching windows | 🚧 In progress — full pipeline wired, real-InDesign verification pending |
-| 4 | Optional future extras: auto photo cropping, headline auto-balancing, batch layout for multiple newspapers, issue history/versioning | 💡 Future idea |
+| 1. Content Checker | Matches text and photo files, checks word counts and photo DPI/color mode, writes `manifest.json` | ✅ Done |
+| 2. Auto-Layout | Python planner + per-newspaper YAML profile → `layout_plan.json`, applied in InDesign by an ExtendScript executor | 🚧 Python side done; InDesign run being verified |
+| 3. One-Click Launcher | Local FastAPI app running the whole pipeline, with InDesign driven over Windows COM | 🚧 Pipeline wired; InDesign run being verified |
 
-See [docs/architecture.md](docs/architecture.md) for the full breakdown,
-including findings from analyzing real IDML samples across newspapers.
+## Engineering highlights
 
-## Tech stack
-
-- **Python** — content validation (`src/inkforge/content_checker`), layout
-  planning (`src/inkforge/layout_engine`), and the Level 3 launcher
-  (`src/inkforge/launcher`, FastAPI).
-- **Adobe InDesign ExtendScript** — the actual in-InDesign layout automation
-  and print-PDF export, because that is the most reliable way to reproduce
-  real newspaper typesetting (CMYK, bleed, `PDF/X-1a:2001`).
-- **pytest**, **PyYAML**, **python-docx**, **Pillow**, **FastAPI**,
-  **pywin32** (Windows-only, for InDesign COM automation).
-
-## Repository layout
-
-```
-docs/                      requirements, architecture, content-folder conventions
-profiles/                  one YAML profile per newspaper (schema: profiles/schema.md)
-src/inkforge/
-  content_checker/         Level 1: scans an issue, builds manifest.json
-  layout_engine/           Level 2 (Python side): manifest.json + profile -> layout_plan.json
-  launcher/                Level 3: FastAPI app driving Levels 1-2 and InDesign
-extendscript/              Level 2 (InDesign side): executor for layout_plan.json (in progress)
-tests/                     pytest suite for the Python side
-```
+- **Reverse-engineered IDML**, InDesign's undocumented XML format, from real production files to map paragraph styles to article roles.
+- **Config-driven engine**: one shared codebase, one YAML profile per newspaper, no newspaper-specific values hardcoded.
+- **Backend driving a desktop app**: a FastAPI service orchestrates InDesign via Windows COM automation.
+- **Real geometry debugging**: found that off-page "pasteboard" content was corrupting frame clustering, and fixed it with a strict page-membership check.
+- **147 tests**, including ones asserting the COM steps fail gracefully when InDesign isn't installed instead of mocking it away.
+- **Shipped in small PRs**, with docs updated alongside the code.
 
 ## Quick start
 
 ```bash
 pip install -e ".[dev]"
 
-# Level 1: scan an issue folder, write manifest.json
-inkforge-check path/to/2026-W40_newspaper-x --newspaper "some_profile_id"
+inkforge-check  path/to/issue-folder --newspaper <profile_id>   # Level 1
+inkforge-plan   path/to/issue-folder/manifest.json --profile <profile_id>   # Level 2
 
-# Level 2: turn the manifest into a layout plan
-inkforge-plan path/to/2026-W40_newspaper-x/manifest.json --profile some_profile_id
-
-# Level 3: local one-click launcher (adds fastapi/uvicorn/pywin32)
 pip install -e ".[launcher]"
-inkforge-launcher
-# -> opens a local page with 4 confirmable steps: check content, build the
-#    layout plan, lay out in InDesign (COM), export a print-ready PDF (COM)
+inkforge-launcher   # Level 3: local web UI with 4 confirmable steps
 
-# run the test suite
 pytest
 ```
 
-## Updating on the layout person's computer
+## Project layout
 
-[`scripts/update_and_run.bat`](scripts/update_and_run.bat) is a
-double-click-to-update script for the non-technical end user's Windows
-machine: it runs `git pull` in the project folder to fetch the latest code
-from GitHub. The project folder must already be a git clone (run `git clone`
-once beforehand), and [Git for Windows](https://git-scm.com/download/win)
-must be installed.
+```
+src/inkforge/
+  content_checker/   Level 1
+  layout_engine/     Level 2 (Python planner)
+  launcher/          Level 3 (FastAPI)
+extendscript/        Level 2 (InDesign executor)
+profiles/            one YAML profile per newspaper
+docs/                requirements, architecture, conventions (Ukrainian)
+tests/               pytest suite
+```
 
 ## Documentation
 
-The in-depth docs are written in Ukrainian, the working language of the
-project and its intended end user:
+The detailed docs are in Ukrainian, the working language of the end user:
+[requirements](docs/requirements.md) · [architecture](docs/architecture.md) · [content structure](docs/content-structure.md) · [first-run checklist](docs/first-run-checklist.md) · [extendscript notes](extendscript/README.md)
 
-- [docs/requirements.md](docs/requirements.md) — full collected requirements
-  (content, typography, print, exception pages).
-- [docs/architecture.md](docs/architecture.md) — the 4 automation levels, tech
-  stack, findings from real IDML sample analysis, open questions.
-- [docs/content-structure.md](docs/content-structure.md) — folder/file
-  convention for a weekly issue.
-- [docs/first-run-checklist.md](docs/first-run-checklist.md) (Ukrainian) —
-  step-by-step checklist for the layout person's first real run on
-  Windows + InDesign.
-- [Українська версія цього README](README.uk.md).
+To update the end user's machine, double-click [`scripts/update_and_run.bat`](scripts/update_and_run.bat). It runs `git pull` in an existing clone and needs Git for Windows.
 
 ## License
 
